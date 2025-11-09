@@ -2,13 +2,29 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // 사용자 문서 - 본인만 읽기/쓰기
-    match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if request.auth != null && request.auth.uid == userId;
+    // 사용자 역할 확인 함수
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
     
-    // 물품 문서 - 로그인한 사용자는 모두 읽기, 작성자만 수정/삭제
+    function isAdmin() {
+      return request.auth != null && getUserRole() == 'admin';
+    }
+    
+    // 사용자 문서 - 모든 로그인한 사용자가 읽기 가능, 본인 또는 관리자만 쓰기
+    match /users/{userId} {
+      // 로그인한 모든 사용자가 읽기 가능 (첫 사용자 확인 및 사용자 목록 조회용)
+      allow read: if request.auth != null;
+      
+      // 신규 사용자 생성 (본인 문서만)
+      allow create: if request.auth != null && request.auth.uid == userId;
+      
+      // 본인 또는 관리자만 업데이트 가능
+      allow update: if request.auth != null && 
+                   (request.auth.uid == userId || isAdmin());
+    }
+    
+    // 물품 문서 - 로그인한 사용자는 모두 읽기, 관리자는 모든 수정/삭제
     match /items/{itemId} {
       // 로그인한 모든 사용자가 읽기 가능
       allow read: if request.auth != null;
@@ -18,13 +34,11 @@ service cloud.firestore {
                     && request.resource.data.userId == request.auth.uid
                     && request.resource.data.userEmail == request.auth.token.email;
       
-      // 작성자만 수정 가능
-      allow update: if request.auth != null 
-                    && resource.data.userId == request.auth.uid;
+      // 관리자는 모든 물품 수정 가능
+      allow update: if request.auth != null && isAdmin();
       
-      // 작성자만 삭제 가능
-      allow delete: if request.auth != null 
-                    && resource.data.userId == request.auth.uid;
+      // 관리자는 모든 물품 삭제 가능
+      allow delete: if request.auth != null && isAdmin();
     }
   }
 }
