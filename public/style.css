@@ -859,6 +859,143 @@ body {
     padding: 20px;
 }
 
+/* 연속 등록 모드 컨트롤 */
+.continuous-mode-control {
+    background: var(--bg-primary);
+    padding: 16px;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    margin-bottom: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid var(--gray-200);
+}
+
+.mode-toggle {
+    display: flex;
+    align-items: center;
+}
+
+.toggle-checkbox {
+    display: none;
+}
+
+.toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.toggle-label::before {
+    content: '';
+    width: 48px;
+    height: 24px;
+    background: var(--gray-300);
+    border-radius: 12px;
+    position: relative;
+    transition: background 0.3s;
+}
+
+.toggle-label::after {
+    content: '';
+    width: 20px;
+    height: 20px;
+    background: white;
+    border-radius: 50%;
+    position: absolute;
+    left: 2px;
+    transition: transform 0.3s;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-checkbox:checked + .toggle-label::before {
+    background: var(--primary);
+}
+
+.toggle-checkbox:checked + .toggle-label::after {
+    transform: translateX(24px);
+}
+
+.toggle-text {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* 항목 선택 모달 */
+.field-config-body {
+    padding: 20px;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.field-checkboxes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.field-checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    background: var(--gray-50);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: var(--transition);
+    border: 2px solid transparent;
+}
+
+.field-checkbox-item:hover {
+    background: var(--gray-100);
+}
+
+.field-checkbox-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--primary);
+}
+
+.field-checkbox-item input[type="checkbox"]:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.field-checkbox-item:has(input:checked) {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary-dark);
+}
+
+.field-checkbox-item:has(input:checked) span {
+    font-weight: 600;
+}
+
+.field-checkbox-item:has(input:disabled) {
+    opacity: 0.8;
+    cursor: not-allowed;
+}
+
+/* 폼 필드 숨김/표시 */
+.form-group[data-field],
+.form-row[data-field],
+.form-section[data-field] {
+    transition: opacity 0.3s, max-height 0.3s;
+}
+
+.form-group[data-field].hidden,
+.form-row[data-field].hidden,
+.form-section[data-field].hidden {
+    display: none;
+}
+
 /* 탭 전환 애니메이션 */
 .tab-content {
     animation: fadeIn 0.3s ease;

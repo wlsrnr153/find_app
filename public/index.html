@@ -112,18 +112,119 @@
 
         <!-- 입력 탭 -->
         <div class="tab-content" id="input">
+            <!-- 연속 등록 모드 컨트롤 -->
+            <div class="continuous-mode-control">
+                <div class="mode-toggle">
+                    <input type="checkbox" id="continuousModeToggle" class="toggle-checkbox">
+                    <label for="continuousModeToggle" class="toggle-label">
+                        <span class="toggle-text">🔄 연속 등록 모드</span>
+                    </label>
+                </div>
+                <button type="button" id="configureFieldsBtn" class="btn btn-secondary btn-small" style="display: none;">
+                    ⚙️ 항목 선택
+                </button>
+            </div>
+
+            <!-- 항목 선택 모달 -->
+            <div id="fieldConfigModal" class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>연속 등록 항목 선택</h2>
+                        <button class="close-btn" id="closeFieldConfig">&times;</button>
+                    </div>
+                    <div class="field-config-body">
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 16px;">
+                            연속 등록 시 사용할 항목을 선택하세요. 체크된 항목만 입력 폼에 표시됩니다.
+                        </p>
+                        <div class="field-checkboxes">
+                            <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="surveyor" checked disabled>
+                                <span>조사자 이름 *</span>
+                            </label>
+                            <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="organization" checked>
+                                <span>기관명</span>
+                            </label>
+                            <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="location" checked>
+                                <span>사용위치</span>
+                            </label>
+                            <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="itemName" checked>
+                                <span>물품명 *</span>
+                            </label>
+                            <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="quantity" checked>
+                                <span>갯수</span>
+                            </label>
+                            <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="category">
+                                <span>카테고리</span>
+                            </label>
+                            <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="manufacturer">
+                                <span>제조사</span>
+                            </label>
+                            <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="model">
+                                <span>모델명</span>
+                            </label>
+                            <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="dimensions">
+                                <span>치수 정보</span>
+                            </label>
+                            <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="color">
+                                <span>색상</span>
+                            </label>
+                            <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="material">
+                                <span>재질</span>
+                            </label>
+                            <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="condition">
+                                <span>상태</span>
+                            </label>
+                            <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="notes">
+                                <span>비고</span>
+                            </label>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-primary" id="applyFieldConfig">✅ 적용</button>
+                            <button type="button" class="btn btn-secondary" id="cancelFieldConfig">취소</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <form id="itemForm" class="form">
-                <div class="form-group">
+                <div class="form-group" data-field="surveyor">
                     <label for="surveyor">조사자 이름 *</label>
                     <input type="text" id="surveyor" name="surveyor" required placeholder="이름을 입력하세요">
                 </div>
 
-                <div class="form-group">
+                <div class="form-group" data-field="organization">
+                    <label for="organization">기관명</label>
+                    <input type="text" id="organization" name="organization" placeholder="예: 현대건설">
+                </div>
+
+                <div class="form-group" data-field="location">
+                    <label for="location">사용위치</label>
+                    <input type="text" id="location" name="location" placeholder="예: 본사 3층 회의실">
+                </div>
+
+                <div class="form-group" data-field="itemName">
                     <label for="itemName">물품명 *</label>
                     <input type="text" id="itemName" name="itemName" required placeholder="예: 사무용 책상">
                 </div>
 
-                <div class="form-group">
+                <div class="form-group" data-field="quantity">
+                    <label for="quantity">갯수</label>
+                    <input type="number" id="quantity" name="quantity" min="1" placeholder="1">
+                </div>
+
+                <div class="form-group" data-field="category">
                     <label for="category">카테고리</label>
                     <select id="category" name="category">
                         <option value="">선택하세요</option>
@@ -134,44 +235,49 @@
                     </select>
                 </div>
 
-                <div class="form-group">
+                <div class="form-group" data-field="manufacturer">
                     <label for="manufacturer">제조사</label>
                     <input type="text" id="manufacturer" name="manufacturer" placeholder="예: 삼성">
                 </div>
 
-                <div class="form-group">
+                <div class="form-group" data-field="model">
                     <label for="model">모델명</label>
                     <input type="text" id="model" name="model" placeholder="예: ABC-123">
                 </div>
 
-                <div class="form-section-title">📏 치수 정보</div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="width">가로 (cm)</label>
-                        <input type="number" id="width" name="width" step="0.1" placeholder="0">
-                    </div>
-                    <div class="form-group">
-                        <label for="height">세로 (cm)</label>
-                        <input type="number" id="height" name="height" step="0.1" placeholder="0">
-                    </div>
-                    <div class="form-group">
-                        <label for="depth">깊이 (cm)</label>
-                        <input type="number" id="depth" name="depth" step="0.1" placeholder="0">
+                <div class="form-section" data-field="dimensions">
+                    <div class="form-section-title">📏 치수 정보</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="width">가로 (cm)</label>
+                            <input type="number" id="width" name="width" step="0.1" placeholder="0">
+                        </div>
+                        <div class="form-group">
+                            <label for="height">세로 (cm)</label>
+                            <input type="number" id="height" name="height" step="0.1" placeholder="0">
+                        </div>
+                        <div class="form-group">
+                            <label for="depth">깊이 (cm)</label>
+                            <input type="number" id="depth" name="depth" step="0.1" placeholder="0">
+                        </div>
                     </div>
                 </div>
 
-                <div class="form-row">
+                <div class="form-row" data-field="color">
                     <div class="form-group">
                         <label for="color">색상</label>
                         <input type="text" id="color" name="color" placeholder="예: 흰색">
                     </div>
+                </div>
+
+                <div class="form-row" data-field="material">
                     <div class="form-group">
                         <label for="material">재질</label>
                         <input type="text" id="material" name="material" placeholder="예: 목재">
                     </div>
                 </div>
 
-                <div class="form-group">
+                <div class="form-group" data-field="condition">
                     <label for="condition">상태</label>
                     <select id="condition" name="condition">
                         <option value="">선택하세요</option>
@@ -183,7 +289,7 @@
                     </select>
                 </div>
 
-                <div class="form-group">
+                <div class="form-group" data-field="notes">
                     <label for="notes">비고</label>
                     <textarea id="notes" name="notes" rows="3" placeholder="추가 정보를 입력하세요"></textarea>
                 </div>

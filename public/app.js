@@ -6,6 +6,8 @@ let currentUser = null;
 let currentEditId = null;
 let unsubscribe = null;
 let currentSort = 'newest';
+let continuousMode = false;
+let selectedFields = ['surveyor', 'organization', 'location', 'itemName', 'quantity'];
 
 // DOM 요소
 const itemForm = document.getElementById('itemForm');
@@ -110,11 +112,18 @@ function switchTab(tabName) {
 
 // 이벤트 리스너 초기화
 function initEventListeners() {
+    // 연속 등록 모드
+    initContinuousMode();
+    
     // 물품 추가 폼
     itemForm.addEventListener('submit', handleAddItem);
     document.getElementById('resetBtn').addEventListener('click', () => {
-        itemForm.reset();
-        document.getElementById('surveyor').value = currentUser.displayName || '';
+        if (continuousMode) {
+            resetFormKeepCommon();
+        } else {
+            itemForm.reset();
+            document.getElementById('surveyor').value = currentUser.displayName || '';
+        }
         showToast('폼이 초기화되었습니다', 'success');
     });
     
@@ -214,6 +223,21 @@ function displayItems(itemsToShow) {
                 <div class="info-item">
                     <span class="info-label">조사자:</span> ${item.surveyor || '-'}
                 </div>
+                ${item.organization ? `
+                    <div class="info-item">
+                        <span class="info-label">기관명:</span> ${item.organization}
+                    </div>
+                ` : ''}
+                ${item.location ? `
+                    <div class="info-item">
+                        <span class="info-label">사용위치:</span> ${item.location}
+                    </div>
+                ` : ''}
+                ${item.quantity ? `
+                    <div class="info-item">
+                        <span class="info-label">갯수:</span> ${item.quantity}개
+                    </div>
+                ` : ''}
                 ${item.manufacturer ? `
                     <div class="info-item">
                         <span class="info-label">제조사:</span> ${item.manufacturer}
@@ -293,6 +317,141 @@ function updateItemCount() {
     itemCount.textContent = `총 ${items.length}개 물품`;
 }
 
+// 연속 등록 모드 초기화
+function initContinuousMode() {
+    const toggle = document.getElementById('continuousModeToggle');
+    const configBtn = document.getElementById('configureFieldsBtn');
+    const fieldConfigModal = document.getElementById('fieldConfigModal');
+    const closeFieldConfig = document.getElementById('closeFieldConfig');
+    const applyFieldConfig = document.getElementById('applyFieldConfig');
+    const cancelFieldConfig = document.getElementById('cancelFieldConfig');
+    
+    // 토글 이벤트
+    toggle.addEventListener('change', (e) => {
+        continuousMode = e.target.checked;
+        configBtn.style.display = continuousMode ? 'block' : 'none';
+        
+        if (continuousMode) {
+            showToast('연속 등록 모드 활성화', 'success');
+            applyFieldVisibility();
+        } else {
+            showToast('연속 등록 모드 비활성화', 'success');
+            showAllFields();
+        }
+    });
+    
+    // 항목 선택 버튼
+    configBtn.addEventListener('click', () => {
+        openFieldConfigModal();
+    });
+    
+    // 모달 닫기
+    closeFieldConfig.addEventListener('click', closeFieldConfigModal);
+    cancelFieldConfig.addEventListener('click', closeFieldConfigModal);
+    
+    // 적용 버튼
+    applyFieldConfig.addEventListener('click', () => {
+        saveFieldConfig();
+        closeFieldConfigModal();
+        applyFieldVisibility();
+        showToast('항목 설정이 적용되었습니다', 'success');
+    });
+    
+    // 모달 외부 클릭
+    fieldConfigModal.addEventListener('click', (e) => {
+        if (e.target === fieldConfigModal) {
+            closeFieldConfigModal();
+        }
+    });
+}
+
+// 항목 선택 모달 열기
+function openFieldConfigModal() {
+    const modal = document.getElementById('fieldConfigModal');
+    const checkboxes = modal.querySelectorAll('.field-checkbox');
+    
+    // 현재 선택된 항목 체크
+    checkboxes.forEach(checkbox => {
+        if (!checkbox.disabled) {
+            checkbox.checked = selectedFields.includes(checkbox.value);
+        }
+    });
+    
+    modal.classList.add('show');
+    document.body.style.overflow = 'hidden';
+}
+
+// 항목 선택 모달 닫기
+function closeFieldConfigModal() {
+    const modal = document.getElementById('fieldConfigModal');
+    modal.classList.remove('show');
+    document.body.style.overflow = 'auto';
+}
+
+// 선택된 항목 저장
+function saveFieldConfig() {
+    const checkboxes = document.querySelectorAll('.field-checkbox:not(:disabled)');
+    selectedFields = ['surveyor', 'itemName']; // 필수 항목
+    
+    checkboxes.forEach(checkbox => {
+        if (checkbox.checked && !checkbox.disabled) {
+            if (!selectedFields.includes(checkbox.value)) {
+                selectedFields.push(checkbox.value);
+            }
+        }
+    });
+}
+
+// 필드 표시/숨김 적용
+function applyFieldVisibility() {
+    const allFields = document.querySelectorAll('[data-field]');
+    
+    allFields.forEach(field => {
+        const fieldName = field.getAttribute('data-field');
+        if (selectedFields.includes(fieldName)) {
+            field.classList.remove('hidden');
+        } else {
+            field.classList.add('hidden');
+        }
+    });
+}
+
+// 모든 필드 표시
+function showAllFields() {
+    const allFields = document.querySelectorAll('[data-field]');
+    allFields.forEach(field => {
+        field.classList.remove('hidden');
+    });
+}
+
+// 연속 등록 시 공통 항목 유지하고 초기화
+function resetFormKeepCommon() {
+    const formData = new FormData(itemForm);
+    const commonValues = {};
+    
+    // 공통 항목 값 저장
+    selectedFields.forEach(field => {
+        const value = formData.get(field);
+        if (value && field !== 'itemName') { // 물품명은 제외
+            commonValues[field] = value;
+        }
+    });
+    
+    // 폼 초기화
+    itemForm.reset();
+    
+    // 공통 항목 값 복원
+    Object.keys(commonValues).forEach(field => {
+        const input = document.getElementById(field);
+        if (input) {
+            input.value = commonValues[field];
+        }
+    });
+    
+    // 물품명 포커스
+    document.getElementById('itemName').focus();
+}
+
 // 물품 추가
 async function handleAddItem(e) {
     e.preventDefault();
@@ -311,8 +470,15 @@ async function handleAddItem(e) {
     try {
         await db.collection('items').add(data);
         showToast('물품이 등록되었습니다', 'success');
-        itemForm.reset();
-        document.getElementById('surveyor').value = currentUser.displayName || '';
+        
+        if (continuousMode) {
+            // 연속 등록 모드: 공통 항목 유지
+            resetFormKeepCommon();
+        } else {
+            // 일반 모드: 전체 초기화
+            itemForm.reset();
+            document.getElementById('surveyor').value = currentUser.displayName || '';
+        }
     } catch (error) {
         console.error('등록 오류:', error);
         showToast('등록 중 오류가 발생했습니다', 'error');
@@ -483,7 +649,10 @@ function exportExcel() {
             const timestamp = item.timestamp ? item.timestamp.toDate() : new Date();
             return {
                 '조사자': item.surveyor || '',
+                '기관명': item.organization || '',
+                '사용위치': item.location || '',
                 '물품명': item.itemName || '',
+                '갯수': item.quantity || '',
                 '카테고리': item.category || '',
                 '제조사': item.manufacturer || '',
                 '모델명': item.model || '',
@@ -574,7 +743,10 @@ async function handleImport(e) {
             
             importedItems = jsonData.map(row => ({
                 surveyor: row['조사자'] || '',
+                organization: row['기관명'] || '',
+                location: row['사용위치'] || '',
                 itemName: row['물품명'] || '',
+                quantity: row['갯수'] || '',
                 category: row['카테고리'] || '',
                 manufacturer: row['제조사'] || '',
                 model: row['모델명'] || '',
