@@ -21,3 +21,8 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Vercel (Firebase 호스팅 사용)
+.vercel
+vercel.json
+.vercelignore
