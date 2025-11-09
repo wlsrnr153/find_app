@@ -998,6 +998,99 @@ body {
     transform: scale(1.05);
 }
 
+/* 사용자 관리 */
+.user-list {
+    display: grid;
+    gap: 12px;
+}
+
+.user-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    background: var(--gray-50);
+    border-radius: 8px;
+    border: 2px solid var(--gray-200);
+    transition: var(--transition);
+}
+
+.user-item:hover {
+    background: var(--gray-100);
+    border-color: var(--primary);
+}
+
+.user-info {
+    flex: 1;
+}
+
+.user-name {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.user-email {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.user-role {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    margin-left: 12px;
+}
+
+.user-role.admin {
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+    color: white;
+}
+
+.user-role.user {
+    background: var(--gray-200);
+    color: var(--text-secondary);
+}
+
+.user-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.role-toggle-btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.role-toggle-btn.make-admin {
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+    color: white;
+}
+
+.role-toggle-btn.make-admin:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(251, 191, 36, 0.4);
+}
+
+.role-toggle-btn.make-user {
+    background: var(--gray-300);
+    color: var(--text-primary);
+}
+
+.role-toggle-btn.make-user:hover {
+    background: var(--gray-400);
+    transform: translateY(-2px);
+}
+
 /* 연속 등록 모드 컨트롤 */
 .continuous-mode-control {
     background: var(--bg-primary);

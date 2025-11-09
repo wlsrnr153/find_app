@@ -3,6 +3,7 @@
 // 전역 상태
 let items = [];
 let currentUser = null;
+let currentUserRole = 'user'; // 'user' 또는 'admin'
 let currentEditId = null;
 let unsubscribe = null;
 let currentSort = 'newest';
@@ -26,16 +27,56 @@ const logoutBtn = document.getElementById('logoutBtn');
 const darkModeToggle = document.getElementById('darkModeToggle');
 
 // 인증 상태 확인
-auth.onAuthStateChanged((user) => {
+auth.onAuthStateChanged(async (user) => {
     if (user) {
         currentUser = user;
-        userName.textContent = `👤 ${user.displayName || user.email}`;
+        
+        // 사용자 역할 확인 및 초기화
+        await initUserRole();
+        
+        const roleEmoji = currentUserRole === 'admin' ? '👑' : '👤';
+        const roleText = currentUserRole === 'admin' ? ' (관리자)' : '';
+        userName.textContent = `${roleEmoji} ${user.displayName || user.email}${roleText}`;
+        
         initApp();
     } else {
         // 로그인 페이지로 리다이렉트
         window.location.href = 'login.html';
     }
 });
+
+// 사용자 역할 초기화
+async function initUserRole() {
+    try {
+        const userDoc = await db.collection('users').doc(currentUser.uid).get();
+        
+        if (userDoc.exists) {
+            // 기존 사용자
+            currentUserRole = userDoc.data().role || 'user';
+        } else {
+            // 신규 사용자 - users 컬렉션에 추가
+            // 첫 번째 사용자인지 확인
+            const usersSnapshot = await db.collection('users').limit(1).get();
+            const isFirstUser = usersSnapshot.empty;
+            
+            currentUserRole = isFirstUser ? 'admin' : 'user';
+            
+            await db.collection('users').doc(currentUser.uid).set({
+                email: currentUser.email,
+                displayName: currentUser.displayName || currentUser.email,
+                role: currentUserRole,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            if (isFirstUser) {
+                showToast('첫 번째 사용자로 관리자 권한이 부여되었습니다', 'success');
+            }
+        }
+    } catch (error) {
+        console.error('사용자 역할 초기화 오류:', error);
+        currentUserRole = 'user'; // 기본값
+    }
+}
 
 // 로그아웃
 logoutBtn.addEventListener('click', async () => {
@@ -56,10 +97,28 @@ function initApp() {
     initOrganizations();
     initTabs();
     initEventListeners();
+    initRoleBasedUI();
     loadItems();
     
     // 조사자 이름 자동완성 (사용자 이름으로)
     document.getElementById('surveyor').value = currentUser.displayName || '';
+}
+
+// 역할별 UI 초기화
+function initRoleBasedUI() {
+    const userManagementSection = document.getElementById('userManagementSection');
+    
+    if (currentUserRole === 'admin') {
+        // 관리자는 사용자 관리 섹션 표시
+        if (userManagementSection) {
+            userManagementSection.style.display = 'block';
+        }
+    } else {
+        // 일반 사용자는 사용자 관리 섹션 숨김
+        if (userManagementSection) {
+            userManagementSection.style.display = 'none';
+        }
+    }
 }
 
 // 기관 관리 초기화
@@ -341,6 +400,12 @@ function initEventListeners() {
     document.getElementById('importFile').addEventListener('change', handleImport);
     document.getElementById('clearAllBtn').addEventListener('click', clearAllData);
     
+    // 사용자 관리 (관리자만)
+    const loadUsersBtn = document.getElementById('loadUsersBtn');
+    if (loadUsersBtn) {
+        loadUsersBtn.addEventListener('click', loadUsers);
+    }
+    
     // 모달 외부 클릭 시 닫기
     editModal.addEventListener('click', (e) => {
         if (e.target === editModal) {
@@ -401,7 +466,7 @@ function displayItems(itemsToShow) {
     }
     
     itemList.innerHTML = itemsToShow.map(item => {
-        const isOwner = item.userId === currentUser.uid;
+        const canEdit = currentUserRole === 'admin'; // 관리자만 수정/삭제 가능
         const timestamp = item.timestamp ? item.timestamp.toDate() : new Date();
         
         return `
@@ -496,7 +561,7 @@ function displayItems(itemsToShow) {
                     ${timestamp.toLocaleString('ko-KR')}
                 </div>
                 <div class="item-actions">
-                    ${isOwner ? `
+                    ${canEdit ? `
                         <button class="btn btn-secondary btn-small" onclick="openEditModal('${item.id}')">✏️ 수정</button>
                         <button class="btn btn-danger btn-small" onclick="deleteItem('${item.id}')">🗑️ 삭제</button>
                     ` : `
@@ -687,9 +752,9 @@ function openEditModal(id) {
     const item = items.find(i => i.id === id);
     if (!item) return;
     
-    // 권한 확인
-    if (item.userId !== currentUser.uid) {
-        showToast('본인이 작성한 물품만 수정할 수 있습니다', 'error');
+    // 권한 확인 - 관리자만 수정 가능
+    if (currentUserRole !== 'admin') {
+        showToast('관리자만 수정할 수 있습니다', 'error');
         return;
     }
     
@@ -752,9 +817,9 @@ async function deleteItem(id) {
     const item = items.find(i => i.id === id);
     if (!item) return;
     
-    // 권한 확인
-    if (item.userId !== currentUser.uid) {
-        showToast('본인이 작성한 물품만 삭제할 수 있습니다', 'error');
+    // 권한 확인 - 관리자만 삭제 가능
+    if (currentUserRole !== 'admin') {
+        showToast('관리자만 삭제할 수 있습니다', 'error');
         return;
     }
     
@@ -1152,8 +1217,89 @@ function getTimeAgo(date) {
     return date.toLocaleDateString('ko-KR');
 }
 
+// 사용자 관리 (관리자 전용)
+async function loadUsers() {
+    if (currentUserRole !== 'admin') {
+        showToast('관리자만 사용할 수 있습니다', 'error');
+        return;
+    }
+    
+    const userListDiv = document.getElementById('userList');
+    userListDiv.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">불러오는 중...</p>';
+    
+    try {
+        const usersSnapshot = await db.collection('users').orderBy('createdAt', 'desc').get();
+        
+        if (usersSnapshot.empty) {
+            userListDiv.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">등록된 사용자가 없습니다</p>';
+            return;
+        }
+        
+        const usersHTML = usersSnapshot.docs.map(doc => {
+            const user = doc.data();
+            const userId = doc.id;
+            const isCurrentUser = userId === currentUser.uid;
+            
+            return `
+                <div class="user-item">
+                    <div class="user-info">
+                        <div class="user-name">
+                            ${user.displayName || user.email}
+                            ${isCurrentUser ? '<span style="color: var(--primary); font-size: 12px;"> (나)</span>' : ''}
+                            <span class="user-role ${user.role}">${user.role === 'admin' ? '👑 관리자' : '👤 일반'}</span>
+                        </div>
+                        <div class="user-email">${user.email}</div>
+                    </div>
+                    <div class="user-actions">
+                        ${!isCurrentUser ? `
+                            <button class="role-toggle-btn ${user.role === 'admin' ? 'make-user' : 'make-admin'}" 
+                                    onclick="toggleUserRole('${userId}', '${user.role}')">
+                                ${user.role === 'admin' ? '일반 사용자로 변경' : '관리자로 지정'}
+                            </button>
+                        ` : '<span style="font-size: 12px; color: var(--text-secondary);">본인 계정</span>'}
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        userListDiv.innerHTML = usersHTML;
+        showToast('사용자 목록을 불러왔습니다', 'success');
+    } catch (error) {
+        console.error('사용자 목록 로드 오류:', error);
+        userListDiv.innerHTML = '<p style="text-align: center; color: var(--danger);">불러오기 실패</p>';
+        showToast('사용자 목록을 불러오는데 실패했습니다', 'error');
+    }
+}
+
+async function toggleUserRole(userId, currentRole) {
+    if (currentUserRole !== 'admin') {
+        showToast('관리자만 사용할 수 있습니다', 'error');
+        return;
+    }
+    
+    const newRole = currentRole === 'admin' ? 'user' : 'admin';
+    const roleText = newRole === 'admin' ? '관리자' : '일반 사용자';
+    
+    if (!confirm(`이 사용자를 ${roleText}로 변경하시겠습니까?`)) {
+        return;
+    }
+    
+    try {
+        await db.collection('users').doc(userId).update({
+            role: newRole
+        });
+        
+        showToast(`${roleText}로 변경되었습니다`, 'success');
+        loadUsers(); // 목록 새로고침
+    } catch (error) {
+        console.error('권한 변경 오류:', error);
+        showToast('권한 변경에 실패했습니다', 'error');
+    }
+}
+
 // 전역 함수로 노출
 window.openEditModal = openEditModal;
 window.deleteItem = deleteItem;
 window.switchTab = switchTab;
 window.deleteOrganization = deleteOrganization;
+window.toggleUserRole = toggleUserRole;
