@@ -7,7 +7,7 @@ let currentEditId = null;
 let unsubscribe = null;
 let currentSort = 'newest';
 let continuousMode = false;
-let selectedFields = ['surveyor', 'organization', 'location', 'itemName', 'quantity'];
+let selectedFields = ['surveyor', 'organization', 'location', 'itemName', 'assetNumber', 'quantity'];
 let organizations = [];
 let currentOrganization = '';
 
@@ -425,6 +425,11 @@ function displayItems(itemsToShow) {
                         <span class="info-label">사용위치:</span> ${item.location}
                     </div>
                 ` : ''}
+                ${item.assetNumber ? `
+                    <div class="info-item">
+                        <span class="info-label">자산번호:</span> ${item.assetNumber}
+                    </div>
+                ` : ''}
                 ${item.quantity ? `
                     <div class="info-item">
                         <span class="info-label">갯수:</span> ${item.quantity}개
@@ -693,7 +698,11 @@ function openEditModal(id) {
     // 폼에 데이터 채우기
     document.getElementById('editId').value = item.id;
     document.getElementById('editSurveyor').value = item.surveyor || '';
+    document.getElementById('editOrganization').value = item.organization || '';
+    document.getElementById('editLocation').value = item.location || '';
     document.getElementById('editItemName').value = item.itemName || '';
+    document.getElementById('editAssetNumber').value = item.assetNumber || '';
+    document.getElementById('editQuantity').value = item.quantity || '';
     document.getElementById('editCategory').value = item.category || '';
     document.getElementById('editManufacturer').value = item.manufacturer || '';
     document.getElementById('editModel').value = item.model || '';
@@ -844,6 +853,7 @@ function exportExcel() {
                 '기관명': item.organization || '',
                 '사용위치': item.location || '',
                 '물품명': item.itemName || '',
+                '자산번호': item.assetNumber || '',
                 '갯수': item.quantity || '',
                 '카테고리': item.category || '',
                 '제조사': item.manufacturer || '',
@@ -938,6 +948,7 @@ async function handleImport(e) {
                 organization: row['기관명'] || '',
                 location: row['사용위치'] || '',
                 itemName: row['물품명'] || '',
+                assetNumber: row['자산번호'] || '',
                 quantity: row['갯수'] || '',
                 category: row['카테고리'] || '',
                 manufacturer: row['제조사'] || '',

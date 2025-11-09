@@ -210,6 +210,10 @@
                                 <span>물품명 *</span>
                             </label>
                             <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="assetNumber" checked>
+                                <span>자산번호</span>
+                            </label>
+                            <label class="field-checkbox-item">
                                 <input type="checkbox" class="field-checkbox" value="quantity" checked>
                                 <span>갯수</span>
                             </label>
@@ -273,6 +277,13 @@
                 <div class="form-group" data-field="itemName">
                     <label for="itemName">물품명 *</label>
                     <input type="text" id="itemName" name="itemName" required placeholder="예: 사무용 책상">
+                </div>
+
+                <div class="form-group" data-field="assetNumber">
+                    <label for="assetNumber">자산번호</label>
+                    <input type="text" id="assetNumber" name="assetNumber" 
+                           inputmode="numeric" pattern="[0-9]*" 
+                           placeholder="예: 1234567890">
                 </div>
 
                 <div class="form-group" data-field="quantity">
@@ -436,8 +447,29 @@
                 </div>
 
                 <div class="form-group">
+                    <label for="editOrganization">기관명</label>
+                    <input type="text" id="editOrganization" name="organization">
+                </div>
+
+                <div class="form-group">
+                    <label for="editLocation">사용위치</label>
+                    <input type="text" id="editLocation" name="location">
+                </div>
+
+                <div class="form-group">
                     <label for="editItemName">물품명 *</label>
                     <input type="text" id="editItemName" name="itemName" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="editAssetNumber">자산번호</label>
+                    <input type="text" id="editAssetNumber" name="assetNumber"
+                           inputmode="numeric" pattern="[0-9]*">
+                </div>
+
+                <div class="form-group">
+                    <label for="editQuantity">갯수</label>
+                    <input type="number" id="editQuantity" name="quantity" min="1">
                 </div>
 
                 <div class="form-group">
