@@ -1,0 +1,23 @@
+# Node modules
+node_modules/
+
+# 업로드 파일
+uploads/
+
+# 로컬 데이터 (선택사항)
+data/items.json
+
+# 환경 설정
+.env
+.env.local
+
+# 로그 파일
+*.log
+
+# OS 파일
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
