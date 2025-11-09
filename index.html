@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>물품 조사 시스템</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 헤더 -->
+        <header class="header">
+            <div class="header-top">
+                <h1>📦 물품 조사 시스템</h1>
+                <div class="header-user">
+                    <span id="userName">👤 로딩중...</span>
+                    <button id="logoutBtn" class="btn-logout">🚪 로그아웃</button>
+                </div>
+            </div>
+            <div class="header-info">
+                <span id="itemCount">총 0개 물품</span>
+            </div>
+        </header>
+
+        <!-- 탭 메뉴 -->
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="input">📝 입력</button>
+            <button class="tab-btn" data-tab="list">📋 목록</button>
+            <button class="tab-btn" data-tab="manage">⚙️ 관리</button>
+        </div>
+
+        <!-- 입력 탭 -->
+        <div class="tab-content active" id="input">
+            <form id="itemForm" class="form">
+                <div class="form-group">
+                    <label for="surveyor">조사자 이름 *</label>
+                    <input type="text" id="surveyor" name="surveyor" required placeholder="이름을 입력하세요">
+                </div>
+
+                <div class="form-group">
+                    <label for="itemName">물품명 *</label>
+                    <input type="text" id="itemName" name="itemName" required placeholder="예: 사무용 책상">
+                </div>
+
+                <div class="form-group">
+                    <label for="category">카테고리</label>
+                    <select id="category" name="category">
+                        <option value="">선택하세요</option>
+                        <option value="가구">가구</option>
+                        <option value="전자제품">전자제품</option>
+                        <option value="사무용품">사무용품</option>
+                        <option value="기타">기타</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="manufacturer">제조사</label>
+                    <input type="text" id="manufacturer" name="manufacturer" placeholder="예: 삼성">
+                </div>
+
+                <div class="form-group">
+                    <label for="model">모델명</label>
+                    <input type="text" id="model" name="model" placeholder="예: ABC-123">
+                </div>
+
+                <div class="form-section-title">📏 치수 정보</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="width">가로 (cm)</label>
+                        <input type="number" id="width" name="width" step="0.1" placeholder="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="height">세로 (cm)</label>
+                        <input type="number" id="height" name="height" step="0.1" placeholder="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="depth">깊이 (cm)</label>
+                        <input type="number" id="depth" name="depth" step="0.1" placeholder="0">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="color">색상</label>
+                        <input type="text" id="color" name="color" placeholder="예: 흰색">
+                    </div>
+                    <div class="form-group">
+                        <label for="material">재질</label>
+                        <input type="text" id="material" name="material" placeholder="예: 목재">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="condition">상태</label>
+                    <select id="condition" name="condition">
+                        <option value="">선택하세요</option>
+                        <option value="매우 좋음">매우 좋음</option>
+                        <option value="좋음">좋음</option>
+                        <option value="보통">보통</option>
+                        <option value="나쁨">나쁨</option>
+                        <option value="매우 나쁨">매우 나쁨</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="notes">비고</label>
+                    <textarea id="notes" name="notes" rows="3" placeholder="추가 정보를 입력하세요"></textarea>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">✅ 저장</button>
+                    <button type="button" class="btn btn-secondary" id="resetBtn">🔄 초기화</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- 목록 탭 -->
+        <div class="tab-content" id="list">
+            <div class="list-controls">
+                <input type="text" id="searchInput" placeholder="🔍 검색 (물품명, 조사자, 제조사 등)">
+                <select id="filterCategory">
+                    <option value="">전체 카테고리</option>
+                    <option value="가구">가구</option>
+                    <option value="전자제품">전자제품</option>
+                    <option value="사무용품">사무용품</option>
+                    <option value="기타">기타</option>
+                </select>
+            </div>
+
+            <div id="itemList" class="item-list">
+                <!-- 동적으로 생성됨 -->
+            </div>
+        </div>
+
+        <!-- 관리 탭 -->
+        <div class="tab-content" id="manage">
+            <div class="manage-section">
+                <h2>📥 데이터 가져오기</h2>
+                <p>엑셀(.xlsx) 또는 JSON 파일을 업로드하세요</p>
+                <div class="upload-area">
+                    <input type="file" id="importFile" accept=".xlsx,.xls,.json" style="display: none;">
+                    <button class="btn btn-secondary" id="importBtn">📂 파일 선택</button>
+                    <span id="fileName"></span>
+                </div>
+            </div>
+
+            <div class="manage-section">
+                <h2>📤 데이터 내보내기</h2>
+                <div class="export-buttons">
+                    <button class="btn btn-success" id="exportExcel">📊 엑셀로 다운로드</button>
+                    <button class="btn btn-secondary" id="exportJson">💾 JSON으로 다운로드</button>
+                </div>
+            </div>
+
+            <div class="manage-section danger-zone">
+                <h2>⚠️ 위험 영역</h2>
+                <p>모든 데이터를 삭제합니다. 이 작업은 되돌릴 수 없습니다.</p>
+                <button class="btn btn-danger" id="clearAllBtn">🗑️ 모든 데이터 삭제</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 알림 토스트 -->
+    <div id="toast" class="toast"></div>
+
+    <!-- 수정 모달 -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>물품 수정</h2>
+                <button class="close-btn" id="closeModal">&times;</button>
+            </div>
+            <form id="editForm" class="form">
+                <input type="hidden" id="editId">
+                
+                <div class="form-group">
+                    <label for="editSurveyor">조사자 이름 *</label>
+                    <input type="text" id="editSurveyor" name="surveyor" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="editItemName">물품명 *</label>
+                    <input type="text" id="editItemName" name="itemName" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="editCategory">카테고리</label>
+                    <select id="editCategory" name="category">
+                        <option value="">선택하세요</option>
+                        <option value="가구">가구</option>
+                        <option value="전자제품">전자제품</option>
+                        <option value="사무용품">사무용품</option>
+                        <option value="기타">기타</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="editManufacturer">제조사</label>
+                    <input type="text" id="editManufacturer" name="manufacturer">
+                </div>
+
+                <div class="form-group">
+                    <label for="editModel">모델명</label>
+                    <input type="text" id="editModel" name="model">
+                </div>
+
+                <div class="form-section-title">📏 치수 정보</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="editWidth">가로 (cm)</label>
+                        <input type="number" id="editWidth" name="width" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="editHeight">세로 (cm)</label>
+                        <input type="number" id="editHeight" name="height" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="editDepth">깊이 (cm)</label>
+                        <input type="number" id="editDepth" name="depth" step="0.1">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="editColor">색상</label>
+                        <input type="text" id="editColor" name="color">
+                    </div>
+                    <div class="form-group">
+                        <label for="editMaterial">재질</label>
+                        <input type="text" id="editMaterial" name="material">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="editCondition">상태</label>
+                    <select id="editCondition" name="condition">
+                        <option value="">선택하세요</option>
+                        <option value="매우 좋음">매우 좋음</option>
+                        <option value="좋음">좋음</option>
+                        <option value="보통">보통</option>
+                        <option value="나쁨">나쁨</option>
+                        <option value="매우 나쁨">매우 나쁨</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="editNotes">비고</label>
+                    <textarea id="editNotes" name="notes" rows="3"></textarea>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">✅ 수정 완료</button>
+                    <button type="button" class="btn btn-secondary" id="cancelEdit">취소</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    
+    <!-- Firebase 설정 -->
+    <script src="firebase-config.js"></script>
+    
+    <!-- SheetJS for Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <script src="app.js"></script>
+</body>
+</html>
+

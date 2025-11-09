@@ -1,0 +1,12 @@
+node_modules
+uploads
+data
+backup
+public
+.git
+.gitignore
+*.md
+firestore.rules
+.firebaserc
+website-integration-example.html
+
