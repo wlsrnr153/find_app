@@ -13,6 +13,7 @@
             <div class="header-top">
                 <h1>📦 물품 조사 시스템</h1>
                 <div class="header-user">
+                    <button id="darkModeToggle" class="btn-icon" title="다크모드 전환">🌙</button>
                     <span id="userName">👤 로딩중...</span>
                     <button id="logoutBtn" class="btn-logout">🚪 로그아웃</button>
                 </div>
@@ -24,13 +25,93 @@
 
         <!-- 탭 메뉴 -->
         <div class="tabs">
-            <button class="tab-btn active" data-tab="input">📝 입력</button>
+            <button class="tab-btn active" data-tab="dashboard">🏠 대시보드</button>
+            <button class="tab-btn" data-tab="input">📝 입력</button>
             <button class="tab-btn" data-tab="list">📋 목록</button>
             <button class="tab-btn" data-tab="manage">⚙️ 관리</button>
         </div>
 
+        <!-- 대시보드 탭 -->
+        <div class="tab-content active" id="dashboard">
+            <!-- 로딩 스켈레톤 -->
+            <div id="dashboardLoading" class="dashboard-loading">
+                <div class="skeleton-card"></div>
+                <div class="skeleton-card"></div>
+                <div class="skeleton-card"></div>
+            </div>
+            
+            <!-- 대시보드 컨텐츠 -->
+            <div id="dashboardContent" style="display: none;">
+                <!-- 통계 카드 -->
+                <div class="stats-grid">
+                    <div class="stat-card stat-primary">
+                        <div class="stat-icon">📦</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="totalItems">0</div>
+                            <div class="stat-label">총 물품 수</div>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-success">
+                        <div class="stat-icon">✨</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="goodCondition">0</div>
+                            <div class="stat-label">양호한 물품</div>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-warning">
+                        <div class="stat-icon">🔧</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="needsAttention">0</div>
+                            <div class="stat-label">점검 필요</div>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-info">
+                        <div class="stat-icon">📅</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="recentItems">0</div>
+                            <div class="stat-label">최근 7일</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 빠른 액션 -->
+                <div class="quick-actions">
+                    <h2>⚡ 빠른 시작</h2>
+                    <div class="action-buttons">
+                        <button class="action-card" onclick="switchTab('input')">
+                            <div class="action-icon">➕</div>
+                            <div class="action-title">물품 추가</div>
+                            <div class="action-desc">새로운 물품 등록</div>
+                        </button>
+                        <button class="action-card" onclick="switchTab('list')">
+                            <div class="action-icon">📋</div>
+                            <div class="action-title">목록 보기</div>
+                            <div class="action-desc">전체 물품 조회</div>
+                        </button>
+                        <button class="action-card" onclick="document.getElementById('exportExcel').click()">
+                            <div class="action-icon">📊</div>
+                            <div class="action-title">엑셀 다운로드</div>
+                            <div class="action-desc">데이터 내보내기</div>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 카테고리별 분포 -->
+                <div class="dashboard-section">
+                    <h2>📊 카테고리별 분포</h2>
+                    <div id="categoryChart" class="category-chart"></div>
+                </div>
+
+                <!-- 최근 물품 -->
+                <div class="dashboard-section">
+                    <h2>🕐 최근 추가된 물품</h2>
+                    <div id="recentItemsList" class="recent-items-list"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- 입력 탭 -->
-        <div class="tab-content active" id="input">
+        <div class="tab-content" id="input">
             <form id="itemForm" class="form">
                 <div class="form-group">
                     <label for="surveyor">조사자 이름 *</label>
@@ -125,6 +206,20 @@
                     <option value="사무용품">사무용품</option>
                     <option value="기타">기타</option>
                 </select>
+                <select id="sortBy">
+                    <option value="newest">최신순</option>
+                    <option value="oldest">오래된순</option>
+                    <option value="name-asc">이름 (가나다순)</option>
+                    <option value="name-desc">이름 (역순)</option>
+                    <option value="category">카테고리순</option>
+                </select>
+            </div>
+
+            <!-- 로딩 스켈레톤 -->
+            <div id="listLoading" class="list-loading" style="display: none;">
+                <div class="skeleton-item"></div>
+                <div class="skeleton-item"></div>
+                <div class="skeleton-item"></div>
             </div>
 
             <div id="itemList" class="item-list">

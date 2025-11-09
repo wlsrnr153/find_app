@@ -5,6 +5,7 @@ let items = [];
 let currentUser = null;
 let currentEditId = null;
 let unsubscribe = null;
+let currentSort = 'newest';
 
 // DOM 요소
 const itemForm = document.getElementById('itemForm');
@@ -12,11 +13,13 @@ const editForm = document.getElementById('editForm');
 const itemList = document.getElementById('itemList');
 const searchInput = document.getElementById('searchInput');
 const filterCategory = document.getElementById('filterCategory');
+const sortBy = document.getElementById('sortBy');
 const itemCount = document.getElementById('itemCount');
 const toast = document.getElementById('toast');
 const editModal = document.getElementById('editModal');
 const userName = document.getElementById('userName');
 const logoutBtn = document.getElementById('logoutBtn');
+const darkModeToggle = document.getElementById('darkModeToggle');
 
 // 인증 상태 확인
 auth.onAuthStateChanged((user) => {
@@ -45,12 +48,33 @@ logoutBtn.addEventListener('click', async () => {
 
 // 앱 초기화
 function initApp() {
+    initDarkMode();
     initTabs();
     initEventListeners();
     loadItems();
     
     // 조사자 이름 자동완성 (사용자 이름으로)
     document.getElementById('surveyor').value = currentUser.displayName || '';
+}
+
+// 다크 모드 초기화
+function initDarkMode() {
+    const savedMode = localStorage.getItem('darkMode');
+    if (savedMode === 'true') {
+        document.body.classList.add('dark-mode');
+        darkModeToggle.textContent = '☀️';
+    }
+    
+    darkModeToggle.addEventListener('click', toggleDarkMode);
+}
+
+// 다크 모드 토글
+function toggleDarkMode() {
+    document.body.classList.toggle('dark-mode');
+    const isDark = document.body.classList.contains('dark-mode');
+    localStorage.setItem('darkMode', isDark);
+    darkModeToggle.textContent = isDark ? '☀️' : '🌙';
+    showToast(isDark ? '다크 모드 활성화' : '라이트 모드 활성화', 'success');
 }
 
 // 탭 초기화
@@ -61,18 +85,27 @@ function initTabs() {
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             const tabName = btn.dataset.tab;
-            
-            tabBtns.forEach(b => b.classList.remove('active'));
-            tabContents.forEach(c => c.classList.remove('active'));
-            
-            btn.classList.add('active');
-            document.getElementById(tabName).classList.add('active');
-            
-            if (tabName === 'list') {
-                loadItems();
-            }
+            switchTab(tabName);
         });
     });
+}
+
+// 탭 전환 함수
+function switchTab(tabName) {
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    const tabContents = document.querySelectorAll('.tab-content');
+    
+    tabBtns.forEach(b => b.classList.remove('active'));
+    tabContents.forEach(c => c.classList.remove('active'));
+    
+    document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+    document.getElementById(tabName).classList.add('active');
+    
+    if (tabName === 'dashboard') {
+        updateDashboard();
+    } else if (tabName === 'list') {
+        loadItems();
+    }
 }
 
 // 이벤트 리스너 초기화
@@ -93,6 +126,10 @@ function initEventListeners() {
     // 검색 및 필터
     searchInput.addEventListener('input', filterItems);
     filterCategory.addEventListener('change', filterItems);
+    sortBy.addEventListener('change', (e) => {
+        currentSort = e.target.value;
+        filterItems();
+    });
     
     // 데이터 관리
     document.getElementById('exportExcel').addEventListener('click', exportExcel);
@@ -118,6 +155,13 @@ function loadItems() {
         unsubscribe();
     }
     
+    // 로딩 표시
+    const listLoading = document.getElementById('listLoading');
+    if (listLoading) {
+        listLoading.style.display = 'block';
+        itemList.innerHTML = '';
+    }
+    
     // 실시간 리스너 등록
     unsubscribe = db.collection('items')
         .orderBy('timestamp', 'desc')
@@ -129,10 +173,16 @@ function loadItems() {
                     ...doc.data()
                 });
             });
+            
+            // 로딩 숨기기
+            if (listLoading) listLoading.style.display = 'none';
+            
             displayItems(items);
             updateItemCount();
+            updateDashboard();
         }, (error) => {
             console.error('데이터 로드 오류:', error);
+            if (listLoading) listLoading.style.display = 'none';
             showToast('데이터를 불러오는데 실패했습니다', 'error');
         });
 }
@@ -357,7 +407,7 @@ function filterItems() {
     const searchTerm = searchInput.value.toLowerCase();
     const category = filterCategory.value;
     
-    const filtered = items.filter(item => {
+    let filtered = items.filter(item => {
         const matchesSearch = !searchTerm || 
             (item.itemName && item.itemName.toLowerCase().includes(searchTerm)) ||
             (item.surveyor && item.surveyor.toLowerCase().includes(searchTerm)) ||
@@ -370,7 +420,55 @@ function filterItems() {
         return matchesSearch && matchesCategory;
     });
     
+    // 정렬 적용
+    filtered = sortItems(filtered, currentSort);
+    
     displayItems(filtered);
+}
+
+// 정렬 함수
+function sortItems(itemsToSort, sortType) {
+    const sorted = [...itemsToSort];
+    
+    switch(sortType) {
+        case 'newest':
+            sorted.sort((a, b) => {
+                const timeA = a.timestamp ? a.timestamp.toDate() : new Date(0);
+                const timeB = b.timestamp ? b.timestamp.toDate() : new Date(0);
+                return timeB - timeA;
+            });
+            break;
+        case 'oldest':
+            sorted.sort((a, b) => {
+                const timeA = a.timestamp ? a.timestamp.toDate() : new Date(0);
+                const timeB = b.timestamp ? b.timestamp.toDate() : new Date(0);
+                return timeA - timeB;
+            });
+            break;
+        case 'name-asc':
+            sorted.sort((a, b) => {
+                const nameA = a.itemName || '';
+                const nameB = b.itemName || '';
+                return nameA.localeCompare(nameB, 'ko');
+            });
+            break;
+        case 'name-desc':
+            sorted.sort((a, b) => {
+                const nameA = a.itemName || '';
+                const nameB = b.itemName || '';
+                return nameB.localeCompare(nameA, 'ko');
+            });
+            break;
+        case 'category':
+            sorted.sort((a, b) => {
+                const catA = a.category || '';
+                const catB = b.category || '';
+                return catA.localeCompare(catB, 'ko');
+            });
+            break;
+    }
+    
+    return sorted;
 }
 
 // 엑셀 다운로드 (클라이언트 사이드)
@@ -561,6 +659,125 @@ function showToast(message, type = 'success') {
     }, 3000);
 }
 
+// 대시보드 업데이트
+function updateDashboard() {
+    const dashboardLoading = document.getElementById('dashboardLoading');
+    const dashboardContent = document.getElementById('dashboardContent');
+    
+    // 로딩 표시
+    dashboardLoading.style.display = 'grid';
+    dashboardContent.style.display = 'none';
+    
+    setTimeout(() => {
+        // 통계 계산
+        const totalItems = items.length;
+        const goodCondition = items.filter(item => 
+            item.condition === '매우 좋음' || item.condition === '좋음'
+        ).length;
+        const needsAttention = items.filter(item => 
+            item.condition === '나쁨' || item.condition === '매우 나쁨'
+        ).length;
+        
+        // 최근 7일 데이터
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        const recentItems = items.filter(item => {
+            const itemDate = item.timestamp ? item.timestamp.toDate() : new Date(0);
+            return itemDate >= sevenDaysAgo;
+        }).length;
+        
+        // 통계 업데이트
+        document.getElementById('totalItems').textContent = totalItems;
+        document.getElementById('goodCondition').textContent = goodCondition;
+        document.getElementById('needsAttention').textContent = needsAttention;
+        document.getElementById('recentItems').textContent = recentItems;
+        
+        // 카테고리별 분포
+        updateCategoryChart();
+        
+        // 최근 물품 목록
+        updateRecentItemsList();
+        
+        // 로딩 숨기기
+        dashboardLoading.style.display = 'none';
+        dashboardContent.style.display = 'block';
+    }, 500);
+}
+
+// 카테고리별 차트 업데이트
+function updateCategoryChart() {
+    const categoryCount = {};
+    items.forEach(item => {
+        const cat = item.category || '미분류';
+        categoryCount[cat] = (categoryCount[cat] || 0) + 1;
+    });
+    
+    const maxCount = Math.max(...Object.values(categoryCount), 1);
+    const categoryChart = document.getElementById('categoryChart');
+    
+    if (Object.keys(categoryCount).length === 0) {
+        categoryChart.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">데이터가 없습니다</p>';
+        return;
+    }
+    
+    categoryChart.innerHTML = Object.entries(categoryCount)
+        .sort((a, b) => b[1] - a[1])
+        .map(([category, count]) => {
+            const percentage = (count / maxCount) * 100;
+            return `
+                <div class="category-bar">
+                    <div class="category-name">${category}</div>
+                    <div class="category-bar-container">
+                        <div class="category-bar-fill" style="width: ${percentage}%">
+                            ${count}개
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+}
+
+// 최근 물품 목록 업데이트
+function updateRecentItemsList() {
+    const recentItemsList = document.getElementById('recentItemsList');
+    const recentItems = items.slice(0, 5);
+    
+    if (recentItems.length === 0) {
+        recentItemsList.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">최근 추가된 물품이 없습니다</p>';
+        return;
+    }
+    
+    recentItemsList.innerHTML = recentItems.map(item => {
+        const timestamp = item.timestamp ? item.timestamp.toDate() : new Date();
+        const timeAgo = getTimeAgo(timestamp);
+        
+        return `
+            <div class="recent-item">
+                <div class="recent-item-info">
+                    <h4>${item.itemName || '미지정'}</h4>
+                    <div class="recent-item-meta">
+                        ${item.surveyor || '-'} • ${timeAgo}
+                    </div>
+                </div>
+                ${item.category ? `<span class="recent-item-badge">${item.category}</span>` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+// 시간 경과 표시 함수
+function getTimeAgo(date) {
+    const seconds = Math.floor((new Date() - date) / 1000);
+    
+    if (seconds < 60) return '방금 전';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}분 전`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}시간 전`;
+    if (seconds < 604800) return `${Math.floor(seconds / 86400)}일 전`;
+    
+    return date.toLocaleDateString('ko-KR');
+}
+
 // 전역 함수로 노출
 window.openEditModal = openEditModal;
 window.deleteItem = deleteItem;
+window.switchTab = switchTab;
