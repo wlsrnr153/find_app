@@ -875,3 +875,476 @@ body {
     }
 }
 
+/* 모바일 최적화 (768px 미만) */
+@media (max-width: 767px) {
+    /* 헤더 최적화 */
+    .header {
+        padding: 12px 16px;
+    }
+    
+    .header h1 {
+        font-size: 18px;
+    }
+    
+    .header-user {
+        gap: 6px;
+        font-size: 12px;
+    }
+    
+    .header-user span {
+        display: none; /* 모바일에서는 사용자 이름 숨김 */
+    }
+    
+    .btn-icon,
+    .btn-logout {
+        padding: 6px 10px;
+        font-size: 14px;
+    }
+    
+    .header-info {
+        font-size: 12px;
+    }
+    
+    /* 탭 메뉴 최적화 */
+    .tabs {
+        position: sticky;
+        top: 0;
+        z-index: 100;
+    }
+    
+    .tab-btn {
+        padding: 12px 8px;
+        font-size: 13px;
+        white-space: nowrap;
+    }
+    
+    /* 컨테이너 최적화 */
+    .container {
+        padding-bottom: 16px;
+    }
+    
+    .tab-content {
+        padding: 12px;
+    }
+    
+    /* 대시보드 최적화 */
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+    
+    .stat-card {
+        padding: 14px;
+        flex-direction: column;
+        text-align: center;
+        gap: 8px;
+    }
+    
+    .stat-icon {
+        font-size: 28px;
+    }
+    
+    .stat-value {
+        font-size: 24px;
+    }
+    
+    .stat-label {
+        font-size: 11px;
+    }
+    
+    /* 빠른 액션 버튼 최적화 */
+    .quick-actions {
+        padding: 16px;
+        margin-bottom: 16px;
+    }
+    
+    .quick-actions h2 {
+        font-size: 16px;
+        margin-bottom: 12px;
+    }
+    
+    .action-buttons {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    
+    .action-card {
+        padding: 16px;
+    }
+    
+    .action-icon {
+        font-size: 28px;
+        margin-bottom: 6px;
+    }
+    
+    .action-title {
+        font-size: 14px;
+    }
+    
+    .action-desc {
+        font-size: 11px;
+    }
+    
+    /* 대시보드 섹션 최적화 */
+    .dashboard-section {
+        padding: 16px;
+        margin-bottom: 16px;
+    }
+    
+    .dashboard-section h2 {
+        font-size: 16px;
+        margin-bottom: 12px;
+    }
+    
+    .category-name {
+        min-width: 70px;
+        font-size: 12px;
+    }
+    
+    .category-bar-container {
+        height: 20px;
+    }
+    
+    .category-bar-fill {
+        font-size: 10px;
+        padding: 0 6px;
+    }
+    
+    .recent-item {
+        padding: 10px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .recent-item-info h4 {
+        font-size: 13px;
+    }
+    
+    .recent-item-meta {
+        font-size: 11px;
+    }
+    
+    .recent-item-badge {
+        font-size: 10px;
+        padding: 3px 6px;
+    }
+    
+    /* 폼 최적화 */
+    .form {
+        padding: 16px;
+        border-radius: 10px;
+    }
+    
+    .form-section-title {
+        font-size: 14px;
+        margin: 16px 0 8px 0;
+    }
+    
+    .form-group {
+        margin-bottom: 14px;
+    }
+    
+    .form-group label {
+        font-size: 13px;
+        margin-bottom: 4px;
+    }
+    
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        padding: 10px;
+        font-size: 14px;
+        border-radius: 6px;
+    }
+    
+    .form-row {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    
+    .form-actions {
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 16px;
+    }
+    
+    /* 버튼 최적화 */
+    .btn {
+        padding: 12px 16px;
+        font-size: 14px;
+        border-radius: 6px;
+    }
+    
+    .btn-small {
+        padding: 5px 10px;
+        font-size: 11px;
+    }
+    
+    /* 목록 컨트롤 최적화 */
+    .list-controls {
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+    
+    .list-controls input,
+    .list-controls select {
+        padding: 10px;
+        font-size: 14px;
+        border-radius: 6px;
+        width: 100%;
+    }
+    
+    /* 아이템 카드 최적화 */
+    .item-list {
+        gap: 10px;
+        grid-template-columns: 1fr;
+    }
+    
+    .item-card {
+        padding: 14px;
+        border-radius: 10px;
+    }
+    
+    .item-card:hover {
+        transform: none; /* 모바일에서는 호버 효과 제거 */
+    }
+    
+    .item-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .item-title {
+        font-size: 16px;
+    }
+    
+    .item-category {
+        font-size: 11px;
+        padding: 3px 8px;
+    }
+    
+    .item-info {
+        grid-template-columns: 1fr;
+        gap: 6px;
+        margin-bottom: 10px;
+    }
+    
+    .info-item {
+        font-size: 12px;
+    }
+    
+    .item-dimensions {
+        gap: 8px;
+        padding: 8px;
+        margin-bottom: 10px;
+        font-size: 12px;
+    }
+    
+    .dimension-label {
+        font-size: 10px;
+    }
+    
+    .item-notes {
+        padding: 8px;
+        font-size: 12px;
+        margin-bottom: 10px;
+    }
+    
+    .item-footer {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+        padding-top: 10px;
+    }
+    
+    .item-meta {
+        font-size: 11px;
+    }
+    
+    .item-actions {
+        width: 100%;
+        gap: 6px;
+    }
+    
+    .item-actions button {
+        flex: 1;
+        font-size: 12px;
+        padding: 8px;
+    }
+    
+    /* 관리 섹션 최적화 */
+    .manage-section {
+        padding: 16px;
+        margin-bottom: 16px;
+        border-radius: 10px;
+    }
+    
+    .manage-section h2 {
+        font-size: 16px;
+        margin-bottom: 8px;
+    }
+    
+    .manage-section p {
+        font-size: 12px;
+        margin-bottom: 12px;
+    }
+    
+    .upload-area {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    #fileName {
+        font-size: 12px;
+        word-break: break-all;
+    }
+    
+    .export-buttons {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    /* 모달 최적화 */
+    .modal {
+        padding: 10px;
+    }
+    
+    .modal-content {
+        max-height: 95vh;
+        border-radius: 10px;
+    }
+    
+    .modal-header {
+        padding: 16px;
+    }
+    
+    .modal-header h2 {
+        font-size: 18px;
+    }
+    
+    .close-btn {
+        font-size: 24px;
+        width: 28px;
+        height: 28px;
+    }
+    
+    /* 토스트 최적화 */
+    .toast {
+        bottom: 16px;
+        left: 10px;
+        right: 10px;
+        transform: translateX(0) translateY(100px);
+        padding: 14px 18px;
+        font-size: 13px;
+        border-radius: 6px;
+    }
+    
+    .toast.show {
+        transform: translateX(0) translateY(0);
+    }
+    
+    /* 빈 상태 최적화 */
+    .empty-state {
+        padding: 40px 16px;
+    }
+    
+    .empty-state-icon {
+        font-size: 36px;
+        margin-bottom: 12px;
+    }
+    
+    .empty-state-text {
+        font-size: 14px;
+    }
+    
+    /* 스켈레톤 최적화 */
+    .skeleton-card {
+        height: 100px;
+        margin-bottom: 12px;
+    }
+    
+    .skeleton-item {
+        height: 150px;
+        margin-bottom: 10px;
+    }
+    
+    .dashboard-loading,
+    .list-loading {
+        padding: 12px;
+    }
+}
+
+/* 초소형 모바일 (360px 미만) */
+@media (max-width: 359px) {
+    .header h1 {
+        font-size: 16px;
+    }
+    
+    .tab-btn {
+        padding: 10px 6px;
+        font-size: 12px;
+    }
+    
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .stat-value {
+        font-size: 20px;
+    }
+    
+    .stat-label {
+        font-size: 10px;
+    }
+    
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        font-size: 13px;
+    }
+    
+    .btn {
+        font-size: 13px;
+        padding: 10px 14px;
+    }
+}
+
+/* 터치 디바이스 최적화 */
+@media (hover: none) and (pointer: coarse) {
+    /* 터치 영역 확대 */
+    .btn,
+    .tab-btn,
+    .btn-icon,
+    .btn-logout {
+        min-height: 44px; /* iOS 권장 최소 터치 영역 */
+    }
+    
+    .list-controls input,
+    .list-controls select,
+    .form-group input,
+    .form-group select {
+        min-height: 44px;
+    }
+    
+    /* 호버 효과 제거 */
+    .stat-card:hover,
+    .action-card:hover,
+    .item-card:hover,
+    .recent-item:hover {
+        transform: none;
+        box-shadow: var(--shadow);
+    }
+    
+    /* 터치 피드백 */
+    .btn:active,
+    .tab-btn:active,
+    .action-card:active {
+        opacity: 0.8;
+        transform: scale(0.98);
+    }
+}
+
