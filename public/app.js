@@ -8,6 +8,8 @@ let unsubscribe = null;
 let currentSort = 'newest';
 let continuousMode = false;
 let selectedFields = ['surveyor', 'organization', 'location', 'itemName', 'quantity'];
+let organizations = [];
+let currentOrganization = '';
 
 // DOM 요소
 const itemForm = document.getElementById('itemForm');
@@ -51,12 +53,202 @@ logoutBtn.addEventListener('click', async () => {
 // 앱 초기화
 function initApp() {
     initDarkMode();
+    initOrganizations();
     initTabs();
     initEventListeners();
     loadItems();
     
     // 조사자 이름 자동완성 (사용자 이름으로)
     document.getElementById('surveyor').value = currentUser.displayName || '';
+}
+
+// 기관 관리 초기화
+function initOrganizations() {
+    // localStorage에서 기관 목록 로드
+    loadOrganizations();
+    
+    // 기관 선택 이벤트
+    const organizationSelect = document.getElementById('organizationSelect');
+    organizationSelect.addEventListener('change', (e) => {
+        selectOrganization(e.target.value);
+    });
+    
+    // 기관 추가 버튼
+    document.getElementById('addOrganizationBtn').addEventListener('click', openAddOrganizationModal);
+    
+    // 기관 관리 버튼
+    document.getElementById('manageOrganizationsBtn').addEventListener('click', openManageOrganizationsModal);
+    
+    // 기관 해제 버튼
+    document.getElementById('clearOrganizationBtn').addEventListener('click', clearOrganization);
+    
+    // 추가 모달
+    document.getElementById('closeAddOrganization').addEventListener('click', closeAddOrganizationModal);
+    document.getElementById('cancelAddOrganizationBtn').addEventListener('click', closeAddOrganizationModal);
+    document.getElementById('saveOrganizationBtn').addEventListener('click', saveNewOrganization);
+    
+    // 관리 모달
+    document.getElementById('closeManageOrganizations').addEventListener('click', closeManageOrganizationsModal);
+    
+    // 모달 외부 클릭
+    document.getElementById('addOrganizationModal').addEventListener('click', (e) => {
+        if (e.target.id === 'addOrganizationModal') closeAddOrganizationModal();
+    });
+    document.getElementById('manageOrganizationsModal').addEventListener('click', (e) => {
+        if (e.target.id === 'manageOrganizationsModal') closeManageOrganizationsModal();
+    });
+    
+    // Enter 키로 기관 추가
+    document.getElementById('newOrganizationName').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') saveNewOrganization();
+    });
+}
+
+// 기관 목록 로드
+function loadOrganizations() {
+    const saved = localStorage.getItem('organizations');
+    organizations = saved ? JSON.parse(saved) : [];
+    updateOrganizationSelect();
+}
+
+// 기관 목록 저장
+function saveOrganizations() {
+    localStorage.setItem('organizations', JSON.stringify(organizations));
+}
+
+// 기관 선택 드롭다운 업데이트
+function updateOrganizationSelect() {
+    const select = document.getElementById('organizationSelect');
+    select.innerHTML = '<option value="">기관을 선택하세요</option>';
+    
+    organizations.forEach(org => {
+        const option = document.createElement('option');
+        option.value = org;
+        option.textContent = org;
+        select.appendChild(option);
+    });
+}
+
+// 기관 선택
+function selectOrganization(orgName) {
+    if (orgName) {
+        currentOrganization = orgName;
+        document.getElementById('organization').value = orgName;
+        document.getElementById('selectedOrgName').textContent = orgName;
+        document.getElementById('selectedOrganizationInfo').style.display = 'flex';
+        showToast(`"${orgName}" 기관이 선택되었습니다`, 'success');
+    } else {
+        clearOrganization();
+    }
+}
+
+// 기관 선택 해제
+function clearOrganization() {
+    currentOrganization = '';
+    document.getElementById('organizationSelect').value = '';
+    document.getElementById('organization').value = '';
+    document.getElementById('selectedOrganizationInfo').style.display = 'none';
+}
+
+// 기관 추가 모달 열기
+function openAddOrganizationModal() {
+    document.getElementById('newOrganizationName').value = '';
+    document.getElementById('addOrganizationModal').classList.add('show');
+    document.body.style.overflow = 'hidden';
+    setTimeout(() => document.getElementById('newOrganizationName').focus(), 100);
+}
+
+// 기관 추가 모달 닫기
+function closeAddOrganizationModal() {
+    document.getElementById('addOrganizationModal').classList.remove('show');
+    document.body.style.overflow = 'auto';
+}
+
+// 새 기관 저장
+function saveNewOrganization() {
+    const input = document.getElementById('newOrganizationName');
+    const orgName = input.value.trim();
+    
+    if (!orgName) {
+        showToast('기관명을 입력하세요', 'error');
+        return;
+    }
+    
+    if (organizations.includes(orgName)) {
+        showToast('이미 등록된 기관입니다', 'error');
+        return;
+    }
+    
+    organizations.push(orgName);
+    organizations.sort();
+    saveOrganizations();
+    updateOrganizationSelect();
+    closeAddOrganizationModal();
+    
+    // 자동 선택
+    document.getElementById('organizationSelect').value = orgName;
+    selectOrganization(orgName);
+    
+    showToast(`"${orgName}" 기관이 추가되었습니다`, 'success');
+}
+
+// 기관 관리 모달 열기
+function openManageOrganizationsModal() {
+    updateOrganizationList();
+    document.getElementById('manageOrganizationsModal').classList.add('show');
+    document.body.style.overflow = 'hidden';
+}
+
+// 기관 관리 모달 닫기
+function closeManageOrganizationsModal() {
+    document.getElementById('manageOrganizationsModal').classList.remove('show');
+    document.body.style.overflow = 'auto';
+}
+
+// 기관 목록 표시
+function updateOrganizationList() {
+    const list = document.getElementById('organizationList');
+    
+    if (organizations.length === 0) {
+        list.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 40px;">등록된 기관이 없습니다</p>';
+        return;
+    }
+    
+    // 각 기관의 사용 횟수 계산
+    const orgCounts = {};
+    items.forEach(item => {
+        if (item.organization) {
+            orgCounts[item.organization] = (orgCounts[item.organization] || 0) + 1;
+        }
+    });
+    
+    list.innerHTML = organizations.map(org => `
+        <div class="organization-item">
+            <div>
+                <span class="organization-item-name">${org}</span>
+                <span class="organization-item-count">(${orgCounts[org] || 0}개 물품)</span>
+            </div>
+            <button class="organization-item-delete" onclick="deleteOrganization('${org}')">✕ 삭제</button>
+        </div>
+    `).join('');
+}
+
+// 기관 삭제
+function deleteOrganization(orgName) {
+    if (!confirm(`"${orgName}" 기관을 삭제하시겠습니까?\n\n※ 주의: 이미 등록된 물품의 기관명은 삭제되지 않습니다.`)) {
+        return;
+    }
+    
+    organizations = organizations.filter(org => org !== orgName);
+    saveOrganizations();
+    updateOrganizationSelect();
+    updateOrganizationList();
+    
+    if (currentOrganization === orgName) {
+        clearOrganization();
+    }
+    
+    showToast(`"${orgName}" 기관이 삭제되었습니다`, 'success');
 }
 
 // 다크 모드 초기화
@@ -953,3 +1145,4 @@ function getTimeAgo(date) {
 window.openEditModal = openEditModal;
 window.deleteItem = deleteItem;
 window.switchTab = switchTab;
+window.deleteOrganization = deleteOrganization;

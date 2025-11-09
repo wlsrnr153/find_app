@@ -112,6 +112,62 @@
 
         <!-- 입력 탭 -->
         <div class="tab-content" id="input">
+            <!-- 기관명 선택/생성 섹션 -->
+            <div class="organization-selector">
+                <div class="organization-header">
+                    <h3>🏢 기관 선택</h3>
+                    <button type="button" id="manageOrganizationsBtn" class="btn-icon" title="기관 관리">⚙️</button>
+                </div>
+                <div class="organization-content">
+                    <select id="organizationSelect" class="organization-select">
+                        <option value="">기관을 선택하세요</option>
+                    </select>
+                    <button type="button" id="addOrganizationBtn" class="btn btn-primary btn-small">➕ 새 기관 추가</button>
+                </div>
+                <div id="selectedOrganizationInfo" class="selected-organization-info" style="display: none;">
+                    <span class="organization-badge">📍 선택된 기관: <strong id="selectedOrgName"></strong></span>
+                    <button type="button" id="clearOrganizationBtn" class="btn-text">✕ 해제</button>
+                </div>
+            </div>
+
+            <!-- 기관 추가 모달 -->
+            <div id="addOrganizationModal" class="modal">
+                <div class="modal-content modal-small">
+                    <div class="modal-header">
+                        <h2>새 기관 추가</h2>
+                        <button class="close-btn" id="closeAddOrganization">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label for="newOrganizationName">기관명 *</label>
+                            <input type="text" id="newOrganizationName" placeholder="예: 현대건설" required>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-primary" id="saveOrganizationBtn">✅ 추가</button>
+                            <button type="button" class="btn btn-secondary" id="cancelAddOrganizationBtn">취소</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 기관 관리 모달 -->
+            <div id="manageOrganizationsModal" class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>기관 관리</h2>
+                        <button class="close-btn" id="closeManageOrganizations">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 16px;">
+                            등록된 기관 목록입니다. 삭제하려면 ✕ 버튼을 클릭하세요.
+                        </p>
+                        <div id="organizationList" class="organization-list">
+                            <!-- 동적으로 생성됨 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- 연속 등록 모드 컨트롤 -->
             <div class="continuous-mode-control">
                 <div class="mode-toggle">

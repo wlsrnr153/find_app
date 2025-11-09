@@ -859,6 +859,145 @@ body {
     padding: 20px;
 }
 
+/* 기관 선택 섹션 */
+.organization-selector {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: var(--shadow-md);
+    margin-bottom: 16px;
+    color: white;
+}
+
+.organization-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.organization-header h3 {
+    font-size: 18px;
+    margin: 0;
+    font-weight: 600;
+}
+
+.organization-content {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.organization-select {
+    flex: 1;
+    padding: 12px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 8px;
+    font-size: 16px;
+    background: rgba(255, 255, 255, 0.95);
+    color: var(--text-primary);
+    transition: var(--transition);
+}
+
+.organization-select:focus {
+    outline: none;
+    border-color: white;
+    background: white;
+}
+
+.selected-organization-info {
+    margin-top: 12px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    backdrop-filter: blur(10px);
+}
+
+.organization-badge {
+    font-size: 14px;
+}
+
+.organization-badge strong {
+    font-size: 16px;
+}
+
+.btn-text {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: var(--transition);
+}
+
+.btn-text:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.modal-small {
+    max-width: 400px;
+}
+
+.modal-body {
+    padding: 20px;
+}
+
+.organization-list {
+    display: grid;
+    gap: 10px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.organization-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: var(--gray-50);
+    border-radius: 8px;
+    border: 2px solid var(--gray-200);
+    transition: var(--transition);
+}
+
+.organization-item:hover {
+    background: var(--gray-100);
+    border-color: var(--primary);
+}
+
+.organization-item-name {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.organization-item-count {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-left: 8px;
+}
+
+.organization-item-delete {
+    background: var(--danger);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.organization-item-delete:hover {
+    background: #dc2626;
+    transform: scale(1.05);
+}
+
 /* 연속 등록 모드 컨트롤 */
 .continuous-mode-control {
     background: var(--bg-primary);
