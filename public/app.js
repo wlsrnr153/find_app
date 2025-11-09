@@ -107,16 +107,23 @@ function initApp() {
 // 역할별 UI 초기화
 function initRoleBasedUI() {
     const userManagementSection = document.getElementById('userManagementSection');
+    const dangerZoneSection = document.getElementById('dangerZoneSection');
     
     if (currentUserRole === 'admin') {
-        // 관리자는 사용자 관리 섹션 표시
+        // 관리자는 사용자 관리 섹션과 위험 영역 표시
         if (userManagementSection) {
             userManagementSection.style.display = 'block';
         }
+        if (dangerZoneSection) {
+            dangerZoneSection.style.display = 'block';
+        }
     } else {
-        // 일반 사용자는 사용자 관리 섹션 숨김
+        // 일반 사용자는 사용자 관리 섹션과 위험 영역 숨김
         if (userManagementSection) {
             userManagementSection.style.display = 'none';
+        }
+        if (dangerZoneSection) {
+            dangerZoneSection.style.display = 'none';
         }
     }
 }
@@ -1059,29 +1066,41 @@ async function handleImport(e) {
 
 // 모든 데이터 삭제 (본인 데이터만)
 async function clearAllData() {
-    const confirmed = confirm('⚠️ 본인이 작성한 모든 데이터를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.');
+    // 권한 확인 - 관리자만 삭제 가능
+    if (currentUserRole !== 'admin') {
+        showToast('관리자만 사용할 수 있습니다', 'error');
+        return;
+    }
+    
+    const confirmed = confirm('⚠️ 경고: 모든 물품 데이터를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없으며, 모든 사용자의 데이터가 삭제됩니다!');
     
     if (!confirmed) return;
     
-    const doubleConfirm = confirm('정말로 삭제하시겠습니까? 다시 한 번 확인합니다.');
+    const doubleConfirm = confirm(`정말로 ${items.length}개의 모든 데이터를 삭제하시겠습니까?\n\n다시 한 번 확인합니다.`);
     
     if (!doubleConfirm) return;
     
+    const tripleConfirm = prompt('정말 삭제하려면 "DELETE"를 입력하세요:');
+    
+    if (tripleConfirm !== 'DELETE') {
+        showToast('삭제가 취소되었습니다', 'info');
+        return;
+    }
+    
     try {
-        const myItems = items.filter(item => item.userId === currentUser.uid);
-        
-        if (myItems.length === 0) {
+        if (items.length === 0) {
             showToast('삭제할 데이터가 없습니다', 'error');
             return;
         }
         
+        // 모든 물품 삭제 (관리자 권한)
         const batch = db.batch();
-        myItems.forEach(item => {
+        items.forEach(item => {
             batch.delete(db.collection('items').doc(item.id));
         });
         
         await batch.commit();
-        showToast(`${myItems.length}개 항목이 삭제되었습니다`, 'success');
+        showToast(`${items.length}개의 모든 항목이 삭제되었습니다`, 'success');
     } catch (error) {
         console.error('삭제 오류:', error);
         showToast('삭제 중 오류가 발생했습니다', 'error');
