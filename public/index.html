@@ -398,6 +398,17 @@
             <div id="itemList" class="item-list">
                 <!-- 동적으로 생성됨 -->
             </div>
+
+            <!-- 페이지네이션 컨트롤 (관리자 전용) -->
+            <div id="paginationControls" class="pagination-controls" style="display: none;">
+                <button id="prevPageBtn" class="btn btn-secondary" onclick="goToFirstPage()">
+                    ⏮️ 첫 페이지
+                </button>
+                <span id="pageInfo" class="page-info">페이지 1</span>
+                <button id="nextPageBtn" class="btn btn-secondary" onclick="loadNextPage()">
+                    다음 페이지 ⏭️
+                </button>
+            </div>
         </div>
 
         <!-- 관리 탭 -->

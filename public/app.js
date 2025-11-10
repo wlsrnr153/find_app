@@ -20,6 +20,12 @@ let initialLoadComplete = false;
 let totalReads = 0;
 let sessionStart = Date.now();
 
+// 📄 페이지네이션 (관리자용)
+let currentPage = 1;
+let lastVisible = null;
+const ADMIN_PAGE_SIZE = 50; // 관리자는 50개씩
+let hasMorePages = true;
+
 // 🚀 Firebase 오프라인 지속성 활성화 (읽기 최적화)
 db.enablePersistence({ synchronizeTabs: true })
     .catch((err) => {
@@ -477,7 +483,7 @@ function initEventListeners() {
     });
 }
 
-// Firestore에서 물품 목록 실시간 로드 (최적화 버전)
+// Firestore에서 물품 목록 실시간 로드 (역할별 최적화)
 function loadItems() {
     // 🔥 핵심: 리스너가 이미 등록되어 있으면 절대 재등록하지 않음!
     if (isListenerRegistered) {
@@ -490,7 +496,7 @@ function loadItems() {
         return;
     }
     
-    console.log('🔄 실시간 리스너 등록 중... (최초 1회만)');
+    console.log('🔄 실시간 리스너 등록 중... (역할별 필터링)');
     
     // 로딩 표시
     const listLoading = document.getElementById('listLoading');
@@ -499,10 +505,31 @@ function loadItems() {
         itemList.innerHTML = '';
     }
     
+    // 🔥 역할별 쿼리 생성
+    let query = db.collection('items');
+    
+    if (currentUserRole === 'admin') {
+        // 👑 관리자: 전체 물품 (페이지네이션)
+        console.log(`👑 관리자: 전체 물품 로드 (${ADMIN_PAGE_SIZE}개씩)`);
+        query = query
+            .orderBy('timestamp', 'desc')
+            .limit(ADMIN_PAGE_SIZE);
+        
+        // 페이지네이션 UI 표시
+        showPaginationControls();
+    } else {
+        // 👤 일반 사용자: 본인 물품만 (전체)
+        console.log('👤 일반 사용자: 본인 물품만 로드');
+        query = query
+            .where('userId', '==', currentUser.uid)
+            .orderBy('timestamp', 'desc');
+        
+        // 페이지네이션 UI 숨김
+        hidePaginationControls();
+    }
+    
     // 🚀 최적화된 실시간 리스너 (변경된 문서만 처리)
-    unsubscribe = db.collection('items')
-        .orderBy('timestamp', 'desc')
-        .onSnapshot((snapshot) => {
+    unsubscribe = query.onSnapshot((snapshot) => {
             // 🔥 초기 로드 체크: 플래그 기반으로 정확하게 판단
             const isInitialLoad = !initialLoadComplete;
             
@@ -519,6 +546,13 @@ function loadItems() {
                 totalReads += items.length;
                 console.log(`📥 초기 로드 완료: ${items.length}개 문서 읽기 (이후로는 변경사항만 읽기)`);
                 console.log(`📊 총 읽기 횟수: ${totalReads}회 (세션 시작 후 ${Math.floor((Date.now() - sessionStart) / 1000)}초)`);
+                
+                // 관리자 페이지네이션: 마지막 문서 저장
+                if (currentUserRole === 'admin' && snapshot.docs.length > 0) {
+                    lastVisible = snapshot.docs[snapshot.docs.length - 1];
+                    hasMorePages = snapshot.docs.length === ADMIN_PAGE_SIZE;
+                    updatePaginationUI();
+                }
             } else {
                 // 🔥 핵심 최적화: 변경된 문서만 처리 (읽기 최소화!)
                 let addedCount = 0, modifiedCount = 0, removedCount = 0;
@@ -1507,9 +1541,129 @@ async function toggleUserRole(userId, currentRole) {
     }
 }
 
+// ===============================================
+// 📄 페이지네이션 함수 (관리자 전용)
+// ===============================================
+
+// 다음 페이지 로드
+async function loadNextPage() {
+    if (!lastVisible || !hasMorePages) {
+        showToast('마지막 페이지입니다', 'info');
+        return;
+    }
+    
+    console.log(`📄 다음 페이지(${currentPage + 1}) 로드 중...`);
+    
+    try {
+        const nextQuery = db.collection('items')
+            .orderBy('timestamp', 'desc')
+            .startAfter(lastVisible)
+            .limit(ADMIN_PAGE_SIZE);
+        
+        const snapshot = await nextQuery.get();
+        
+        if (snapshot.empty) {
+            showToast('더 이상 데이터가 없습니다', 'info');
+            hasMorePages = false;
+            updatePaginationUI();
+            return;
+        }
+        
+        // 데이터 교체 (이전 페이지 데이터는 제거)
+        items = [];
+        snapshot.forEach((doc) => {
+            items.push({
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+        
+        lastVisible = snapshot.docs[snapshot.docs.length - 1];
+        hasMorePages = snapshot.docs.length === ADMIN_PAGE_SIZE;
+        currentPage++;
+        
+        displayItems(items);
+        updateItemCount();
+        updatePaginationUI();
+        
+        totalReads += snapshot.docs.length;
+        console.log(`📥 페이지 ${currentPage} 로드 완료: ${items.length}개 (총 읽기: ${totalReads}회)`);
+        
+        // 페이지 상단으로 스크롤
+        document.getElementById('listTab')?.scrollIntoView({ behavior: 'smooth' });
+        
+    } catch (error) {
+        console.error('다음 페이지 로드 오류:', error);
+        showToast('페이지 로드에 실패했습니다', 'error');
+    }
+}
+
+// 이전 페이지는 첫 페이지로 돌아가기
+function goToFirstPage() {
+    if (currentPage === 1) {
+        showToast('이미 첫 페이지입니다', 'info');
+        return;
+    }
+    
+    console.log('📄 첫 페이지로 이동');
+    
+    // 리스너 해제 후 재등록
+    if (unsubscribe) {
+        unsubscribe();
+    }
+    
+    // 상태 초기화
+    items = [];
+    currentPage = 1;
+    lastVisible = null;
+    hasMorePages = true;
+    isListenerRegistered = false;
+    initialLoadComplete = false;
+    
+    // 다시 로드
+    loadItems();
+}
+
+// 페이지네이션 UI 업데이트
+function updatePaginationUI() {
+    const prevBtn = document.getElementById('prevPageBtn');
+    const nextBtn = document.getElementById('nextPageBtn');
+    const pageInfo = document.getElementById('pageInfo');
+    
+    if (prevBtn) {
+        prevBtn.disabled = currentPage === 1;
+    }
+    
+    if (nextBtn) {
+        nextBtn.disabled = !hasMorePages;
+    }
+    
+    if (pageInfo) {
+        pageInfo.textContent = `페이지 ${currentPage}`;
+    }
+}
+
+// 페이지네이션 컨트롤 표시
+function showPaginationControls() {
+    const paginationDiv = document.getElementById('paginationControls');
+    if (paginationDiv) {
+        paginationDiv.style.display = 'flex';
+    }
+}
+
+// 페이지네이션 컨트롤 숨김
+function hidePaginationControls() {
+    const paginationDiv = document.getElementById('paginationControls');
+    if (paginationDiv) {
+        paginationDiv.style.display = 'none';
+    }
+}
+
 // 전역 함수로 노출
 window.openEditModal = openEditModal;
 window.deleteItem = deleteItem;
 window.switchTab = switchTab;
 window.deleteOrganization = deleteOrganization;
 window.toggleUserRole = toggleUserRole;
+window.loadNextPage = loadNextPage;
+window.goToFirstPage = goToFirstPage;
