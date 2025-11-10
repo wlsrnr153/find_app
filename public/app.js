@@ -515,10 +515,17 @@ function displayItems(itemsToShow) {
     
     itemList.innerHTML = itemsToShow.map(item => {
         // 권한 체크: 관리자이거나 본인이 작성한 물품만 수정 가능
-        const isOwner = item.userId === currentUser.uid;
-        const canEdit = currentUserRole === 'admin' || isOwner;
+        const isOwner = currentUser && item.userId && item.userId === currentUser.uid;
+        // userId가 없는 기존 물품은 모든 사용자가 수정 가능 (하위 호환성)
+        const hasNoOwner = !item.userId;
+        const canEdit = currentUserRole === 'admin' || isOwner || hasNoOwner;
         const canDelete = currentUserRole === 'admin'; // 관리자만 삭제 가능
         const timestamp = item.timestamp ? item.timestamp.toDate() : new Date();
+        
+        // 디버깅용 (콘솔에서 확인 가능)
+        if (window.DEBUG_MODE) {
+            console.log('물품:', item.itemName, '| userId:', item.userId, '| 현재 사용자:', currentUser?.uid, '| 수정 가능:', canEdit);
+        }
         
         return `
         <div class="item-card" data-id="${item.id}">
@@ -806,8 +813,20 @@ function openEditModal(id) {
     if (!item) return;
     
     // 권한 확인: 관리자이거나 본인이 작성한 물품만 수정 가능
-    const isOwner = item.userId === currentUser.uid;
-    if (currentUserRole !== 'admin' && !isOwner) {
+    const isOwner = currentUser && item.userId && item.userId === currentUser.uid;
+    const hasNoOwner = !item.userId; // 기존 물품 (userId 없음)
+    
+    // 디버깅 정보
+    console.log('수정 시도:', {
+        물품: item.itemName,
+        물품userId: item.userId,
+        현재사용자: currentUser?.uid,
+        역할: currentUserRole,
+        작성자: isOwner,
+        소유자없음: hasNoOwner
+    });
+    
+    if (currentUserRole !== 'admin' && !isOwner && !hasNoOwner) {
         showToast('본인이 작성한 물품만 수정할 수 있습니다', 'error');
         return;
     }

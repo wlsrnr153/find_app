@@ -34,9 +34,11 @@ service cloud.firestore {
                     && request.resource.data.userId == request.auth.uid
                     && request.resource.data.userEmail == request.auth.token.email;
       
-      // 관리자 또는 작성자만 수정 가능
+      // 관리자, 작성자, 또는 userId가 없는 기존 물품(하위 호환성)은 수정 가능
       allow update: if request.auth != null && 
-                    (isAdmin() || resource.data.userId == request.auth.uid);
+                    (isAdmin() || 
+                     resource.data.userId == request.auth.uid ||
+                     !("userId" in resource.data));
       
       // 관리자만 삭제 가능
       allow delete: if request.auth != null && isAdmin();
