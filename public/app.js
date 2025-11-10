@@ -70,46 +70,59 @@ auth.onAuthStateChanged(async (user) => {
     }
 });
 
-// 사용자 역할 초기화
+// 사용자 역할 초기화 (Custom Claims 사용 - 읽기 최적화)
 async function initUserRole() {
     try {
-        // 🚀 캐시 확인 (5분 유효)
-        const cacheKey = `userRole_${currentUser.uid}`;
-        const cacheTimeKey = `userRole_${currentUser.uid}_time`;
-        const cachedRole = localStorage.getItem(cacheKey);
-        const cacheTime = localStorage.getItem(cacheTimeKey);
+        // 🔥 1순위: Custom Claims에서 역할 확인 (읽기 0회!)
+        const idTokenResult = await currentUser.getIdTokenResult();
         
-        if (cachedRole && cacheTime) {
-            const age = Date.now() - parseInt(cacheTime);
-            if (age < 5 * 60 * 1000) { // 5분 이내
-                currentUserRole = cachedRole;
-                console.log('✅ 사용자 역할 캐시에서 로드 (읽기 0회):', currentUserRole);
-                return;
-            }
+        if (idTokenResult.claims.role) {
+            // Custom Claims에 role이 있으면 바로 사용
+            currentUserRole = idTokenResult.claims.role;
+            console.log('✅ Custom Claims에서 역할 로드 (읽기 0회):', currentUserRole);
+            return;
         }
         
-        // 캐시가 없거나 만료됨 - Firestore에서 읽기
-        console.log('📥 사용자 역할 Firestore에서 읽기...');
+        // 🔄 Custom Claims가 없는 경우 (기존 사용자 또는 신규 가입)
+        console.log('⚠️ Custom Claims 없음 - Firestore 확인...');
+        
         const userDoc = await db.collection('users').doc(currentUser.uid).get({ source: 'default' });
-        totalReads += 1; // 사용자 역할 읽기
-        console.log(`📊 총 읽기 횟수: ${totalReads}회 (사용자 역할 1회 추가)`);
+        totalReads += 1;
+        console.log(`📊 총 읽기 횟수: ${totalReads}회 (사용자 역할 확인)`);
         
         if (userDoc.exists) {
-            // 기존 사용자
+            // 기존 사용자 - Firestore에는 있지만 Custom Claims가 없음
             currentUserRole = userDoc.data().role || 'user';
+            console.log(`📝 기존 사용자 역할: ${currentUserRole}`);
             
-            // 캐시 저장
-            localStorage.setItem(cacheKey, currentUserRole);
-            localStorage.setItem(cacheTimeKey, Date.now().toString());
+            // 🔧 Custom Claims 마이그레이션 시도
+            console.log('🔄 Custom Claims 설정 시도 (마이그레이션)...');
+            try {
+                const setRole = firebase.functions().httpsCallable('setUserRole');
+                await setRole({ userId: currentUser.uid, role: currentUserRole });
+                
+                // 토큰 강제 갱신하여 Custom Claims 즉시 적용
+                await currentUser.getIdToken(true);
+                
+                console.log('✅ Custom Claims 마이그레이션 완료');
+                showToast('사용자 정보가 업데이트되었습니다', 'success');
+            } catch (functionError) {
+                console.warn('⚠️ Custom Claims 설정 실패 (Functions 미배포 또는 권한 없음):', functionError);
+                // 실패해도 계속 진행 (Firestore 역할 사용)
+            }
         } else {
-            // 신규 사용자 - users 컬렉션에 추가
-            // 첫 번째 사용자인지 확인
+            // 신규 사용자
+            console.log('🆕 신규 사용자 감지');
+            
+            // Cloud Function의 onUserCreate가 자동으로 처리하므로
+            // 여기서는 기본값만 설정 (Functions가 처리 완료되면 다음 로그인 시 Custom Claims 적용됨)
             const usersSnapshot = await db.collection('users').limit(1).get();
-            totalReads += 1; // 사용자 목록 확인 읽기
+            totalReads += 1;
             const isFirstUser = usersSnapshot.empty;
             
             currentUserRole = isFirstUser ? 'admin' : 'user';
             
+            // Firestore에 저장 (Cloud Function의 onUserCreate와 중복될 수 있으나 안전장치)
             await db.collection('users').doc(currentUser.uid).set({
                 email: currentUser.email,
                 displayName: currentUser.displayName || currentUser.email,
@@ -117,13 +130,14 @@ async function initUserRole() {
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             
-            // 캐시 저장
-            localStorage.setItem(cacheKey, currentUserRole);
-            localStorage.setItem(cacheTimeKey, Date.now().toString());
+            console.log(`✅ 신규 사용자 등록: ${currentUserRole}`);
             
             if (isFirstUser) {
                 showToast('첫 번째 사용자로 관리자 권한이 부여되었습니다', 'success');
             }
+            
+            // 다음 로그인 때 Custom Claims가 적용되도록 안내
+            console.log('ℹ️ 다음 로그인 시 Custom Claims가 자동으로 적용됩니다');
         }
     } catch (error) {
         console.error('사용자 역할 초기화 오류:', error);
@@ -1570,15 +1584,27 @@ async function toggleUserRole(userId, currentRole) {
     }
     
     try {
-        await db.collection('users').doc(userId).update({
-            role: newRole
-        });
+        // 🔥 Cloud Function 호출 (Custom Claims 설정 포함)
+        const setRole = firebase.functions().httpsCallable('setUserRole');
+        const result = await setRole({ userId, role: newRole });
         
+        console.log('✅ 역할 변경 완료:', result.data);
         showToast(`${roleText}로 변경되었습니다`, 'success');
         loadUsers(); // 목록 새로고침
     } catch (error) {
         console.error('권한 변경 오류:', error);
-        showToast('권한 변경에 실패했습니다', 'error');
+        
+        // 오류 메시지 처리
+        let errorMessage = '권한 변경에 실패했습니다';
+        if (error.code === 'permission-denied') {
+            errorMessage = '관리자 권한이 필요합니다';
+        } else if (error.code === 'unauthenticated') {
+            errorMessage = '로그인이 필요합니다';
+        } else if (error.message) {
+            errorMessage = error.message;
+        }
+        
+        showToast(errorMessage, 'error');
     }
 }
 

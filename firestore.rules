@@ -2,13 +2,11 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // 사용자 역할 확인 함수
-    function getUserRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
-    }
-    
+    // 🔥 최적화: Custom Claims 사용 - get() 호출 없음! (읽기 0회)
+    // 이전: getUserRole()에서 매번 users 문서를 읽음 (읽기 +1)
+    // 현재: 토큰에서 바로 읽음 (읽기 0회)
     function isAdmin() {
-      return request.auth != null && getUserRole() == 'admin';
+      return request.auth != null && request.auth.token.role == 'admin';
     }
     
     // 사용자 문서 - 모든 로그인한 사용자가 읽기 가능, 본인 또는 관리자만 쓰기
