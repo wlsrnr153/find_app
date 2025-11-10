@@ -12,6 +12,16 @@ let selectedFields = ['surveyor', 'organization', 'location', 'itemName', 'asset
 let organizations = [];
 let currentOrganization = '';
 
+// 🚀 Firebase 오프라인 지속성 활성화 (읽기 최적화)
+db.enablePersistence({ synchronizeTabs: true })
+    .catch((err) => {
+        if (err.code == 'failed-precondition') {
+            console.warn('여러 탭이 열려 있어 오프라인 지속성이 비활성화됩니다.');
+        } else if (err.code == 'unimplemented') {
+            console.warn('브라우저가 오프라인 지속성을 지원하지 않습니다.');
+        }
+    });
+
 // DOM 요소
 const itemForm = document.getElementById('itemForm');
 const editForm = document.getElementById('editForm');
@@ -421,7 +431,7 @@ function initEventListeners() {
     });
 }
 
-// Firestore에서 물품 목록 실시간 로드
+// Firestore에서 물품 목록 실시간 로드 (최적화 버전)
 function loadItems() {
     // 이전 리스너 해제
     if (unsubscribe) {
@@ -435,17 +445,48 @@ function loadItems() {
         itemList.innerHTML = '';
     }
     
-    // 실시간 리스너 등록
+    // 🚀 최적화된 실시간 리스너 (변경된 문서만 처리)
     unsubscribe = db.collection('items')
         .orderBy('timestamp', 'desc')
         .onSnapshot((snapshot) => {
-            items = [];
-            snapshot.forEach((doc) => {
-                items.push({
-                    id: doc.id,
-                    ...doc.data()
+            // 초기 로드인지 확인
+            const isInitialLoad = items.length === 0;
+            
+            if (isInitialLoad) {
+                // 초기 로드: 모든 문서
+                items = [];
+                snapshot.forEach((doc) => {
+                    items.push({
+                        id: doc.id,
+                        ...doc.data()
+                    });
                 });
-            });
+                console.log(`📥 초기 로드: ${items.length}개 문서 읽기`);
+            } else {
+                // 🔥 핵심 최적화: 변경된 문서만 처리 (읽기 최소화!)
+                snapshot.docChanges().forEach((change) => {
+                    const docData = { id: change.doc.id, ...change.doc.data() };
+                    
+                    if (change.type === 'added') {
+                        // 새 문서 추가 (중복 방지)
+                        if (!items.find(item => item.id === docData.id)) {
+                            items.unshift(docData);
+                            console.log('➕ 문서 추가 (읽기 1회)');
+                        }
+                    } else if (change.type === 'modified') {
+                        // 문서 수정
+                        const index = items.findIndex(item => item.id === docData.id);
+                        if (index !== -1) {
+                            items[index] = docData;
+                            console.log('✏️ 문서 수정 (읽기 1회)');
+                        }
+                    } else if (change.type === 'removed') {
+                        // 문서 삭제
+                        items = items.filter(item => item.id !== docData.id);
+                        console.log('🗑️ 문서 삭제 (읽기 1회)');
+                    }
+                });
+            }
             
             // 로딩 숨기기
             if (listLoading) listLoading.style.display = 'none';
