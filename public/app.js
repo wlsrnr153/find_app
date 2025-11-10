@@ -12,6 +12,14 @@ let selectedFields = ['surveyor', 'organization', 'location', 'itemName', 'asset
 let organizations = [];
 let currentOrganization = '';
 
+// 🔥 리스너 등록 추적 (중복 방지)
+let isListenerRegistered = false;
+let initialLoadComplete = false;
+
+// 📊 읽기 횟수 추적 (디버깅용)
+let totalReads = 0;
+let sessionStart = Date.now();
+
 // 🚀 Firebase 오프라인 지속성 활성화 (읽기 최적화)
 db.enablePersistence({ synchronizeTabs: true })
     .catch((err) => {
@@ -76,6 +84,8 @@ async function initUserRole() {
         // 캐시가 없거나 만료됨 - Firestore에서 읽기
         console.log('📥 사용자 역할 Firestore에서 읽기...');
         const userDoc = await db.collection('users').doc(currentUser.uid).get({ source: 'default' });
+        totalReads += 1; // 사용자 역할 읽기
+        console.log(`📊 총 읽기 횟수: ${totalReads}회 (사용자 역할 1회 추가)`);
         
         if (userDoc.exists) {
             // 기존 사용자
@@ -88,6 +98,7 @@ async function initUserRole() {
             // 신규 사용자 - users 컬렉션에 추가
             // 첫 번째 사용자인지 확인
             const usersSnapshot = await db.collection('users').limit(1).get();
+            totalReads += 1; // 사용자 목록 확인 읽기
             const isFirstUser = usersSnapshot.empty;
             
             currentUserRole = isFirstUser ? 'admin' : 'user';
@@ -405,16 +416,8 @@ function switchTab(tabName) {
     if (tabName === 'dashboard') {
         updateDashboard();
     } else if (tabName === 'list') {
-        // 🔥 중요: 리스너가 없을 때만 등록 (중복 방지!)
-        if (!unsubscribe) {
-            console.log('⚠️ 리스너가 없어서 새로 등록합니다');
-            loadItems();
-        } else {
-            // 이미 로드된 데이터만 표시
-            console.log('✅ 기존 데이터 표시 (읽기 0회)');
-            displayItems(items);
-            updateItemCount();
-        }
+        // 🔥 핵심: loadItems()가 알아서 중복 체크함
+        loadItems(); // 내부에서 이미 등록되어 있으면 데이터만 표시 (읽기 0회)
     }
 }
 
@@ -473,12 +476,18 @@ function initEventListeners() {
 
 // Firestore에서 물품 목록 실시간 로드 (최적화 버전)
 function loadItems() {
-    // 이전 리스너 해제
-    if (unsubscribe) {
-        console.log('⚠️ 기존 리스너 해제');
-        unsubscribe();
-        unsubscribe = null;
+    // 🔥 핵심: 리스너가 이미 등록되어 있으면 절대 재등록하지 않음!
+    if (isListenerRegistered) {
+        console.log('✅ 리스너가 이미 등록되어 있음 (읽기 0회)');
+        // 데이터만 다시 표시
+        if (items.length > 0) {
+            displayItems(items);
+            updateItemCount();
+        }
+        return;
     }
+    
+    console.log('🔄 실시간 리스너 등록 중... (최초 1회만)');
     
     // 로딩 표시
     const listLoading = document.getElementById('listLoading');
@@ -487,17 +496,15 @@ function loadItems() {
         itemList.innerHTML = '';
     }
     
-    console.log('🔄 실시간 리스너 등록 중...');
-    
     // 🚀 최적화된 실시간 리스너 (변경된 문서만 처리)
     unsubscribe = db.collection('items')
         .orderBy('timestamp', 'desc')
         .onSnapshot((snapshot) => {
-            // 🔥 초기 로드 체크를 더 완화하여 안정성 향상
-            const isInitialLoad = items.length === 0;
+            // 🔥 초기 로드 체크: 플래그 기반으로 정확하게 판단
+            const isInitialLoad = !initialLoadComplete;
             
             if (isInitialLoad) {
-                // 초기 로드: 모든 문서
+                // 초기 로드: 모든 문서 (앱 실행 후 최초 1회만)
                 items = [];
                 snapshot.forEach((doc) => {
                     items.push({
@@ -505,7 +512,10 @@ function loadItems() {
                         ...doc.data()
                     });
                 });
-                console.log(`📥 초기 로드: ${items.length}개 문서 읽기`);
+                initialLoadComplete = true; // 🔥 플래그 설정 - 다시는 전체 읽기 안 함!
+                totalReads += items.length;
+                console.log(`📥 초기 로드 완료: ${items.length}개 문서 읽기 (이후로는 변경사항만 읽기)`);
+                console.log(`📊 총 읽기 횟수: ${totalReads}회 (세션 시작 후 ${Math.floor((Date.now() - sessionStart) / 1000)}초)`);
             } else {
                 // 🔥 핵심 최적화: 변경된 문서만 처리 (읽기 최소화!)
                 let addedCount = 0, modifiedCount = 0, removedCount = 0;
@@ -543,7 +553,10 @@ function loadItems() {
                 });
                 
                 if (addedCount > 0 || modifiedCount > 0 || removedCount > 0) {
-                    console.log(`🔄 변경사항 총계: ➕${addedCount} ✏️${modifiedCount} 🗑️${removedCount} (총 읽기 ${addedCount + modifiedCount + removedCount}회)`);
+                    const changeReads = addedCount + modifiedCount + removedCount;
+                    totalReads += changeReads;
+                    console.log(`🔄 변경사항 총계: ➕${addedCount} ✏️${modifiedCount} 🗑️${removedCount} (읽기 ${changeReads}회)`);
+                    console.log(`📊 총 읽기 횟수: ${totalReads}회 (세션 시작 후 ${Math.floor((Date.now() - sessionStart) / 1000)}초)`);
                 }
             }
             
@@ -559,7 +572,9 @@ function loadItems() {
             showToast('데이터를 불러오는데 실패했습니다', 'error');
         });
     
-    console.log('✅ 실시간 리스너 등록 완료');
+    // 🔥 리스너 등록 플래그 설정 - 절대 재등록 안 함!
+    isListenerRegistered = true;
+    console.log('✅ 실시간 리스너 등록 완료 (앱 종료 전까지 유지)');
 }
 
 // 물품 목록 표시
