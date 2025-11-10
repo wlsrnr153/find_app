@@ -473,7 +473,8 @@ function displayItems(itemsToShow) {
     }
     
     itemList.innerHTML = itemsToShow.map(item => {
-        const canEdit = currentUserRole === 'admin'; // 관리자만 수정/삭제 가능
+        const canEdit = true; // 모든 사용자가 수정 가능
+        const canDelete = currentUserRole === 'admin'; // 관리자만 삭제 가능
         const timestamp = item.timestamp ? item.timestamp.toDate() : new Date();
         
         return `
@@ -568,12 +569,10 @@ function displayItems(itemsToShow) {
                     ${timestamp.toLocaleString('ko-KR')}
                 </div>
                 <div class="item-actions">
-                    ${canEdit ? `
-                        <button class="btn btn-secondary btn-small" onclick="openEditModal('${item.id}')">✏️ 수정</button>
+                    <button class="btn btn-secondary btn-small" onclick="openEditModal('${item.id}')">✏️ 수정</button>
+                    ${canDelete ? `
                         <button class="btn btn-danger btn-small" onclick="deleteItem('${item.id}')">🗑️ 삭제</button>
-                    ` : `
-                        <span style="font-size: 12px; color: var(--gray-600);">읽기 전용</span>
-                    `}
+                    ` : ''}
                 </div>
             </div>
         </div>
@@ -758,12 +757,6 @@ async function handleAddItem(e) {
 function openEditModal(id) {
     const item = items.find(i => i.id === id);
     if (!item) return;
-    
-    // 권한 확인 - 관리자만 수정 가능
-    if (currentUserRole !== 'admin') {
-        showToast('관리자만 수정할 수 있습니다', 'error');
-        return;
-    }
     
     currentEditId = id;
     
