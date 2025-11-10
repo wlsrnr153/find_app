@@ -493,8 +493,8 @@ function loadItems() {
     unsubscribe = db.collection('items')
         .orderBy('timestamp', 'desc')
         .onSnapshot((snapshot) => {
-            // 초기 로드인지 확인 (더 정확한 체크)
-            const isInitialLoad = items.length === 0 && snapshot.docChanges().length === snapshot.docs.length;
+            // 🔥 초기 로드 체크를 더 완화하여 안정성 향상
+            const isInitialLoad = items.length === 0;
             
             if (isInitialLoad) {
                 // 초기 로드: 모든 문서
@@ -515,9 +515,13 @@ function loadItems() {
                     
                     if (change.type === 'added') {
                         // 새 문서 추가 (중복 방지)
-                        if (!items.find(item => item.id === docData.id)) {
+                        const existingIndex = items.findIndex(item => item.id === docData.id);
+                        if (existingIndex === -1) {
                             items.unshift(docData);
                             addedCount++;
+                            console.log(`➕ 새 물품 추가: "${docData.itemName}" (userId: ${docData.userId})`);
+                        } else {
+                            console.log(`⚠️ 이미 존재하는 물품: "${docData.itemName}"`);
                         }
                     } else if (change.type === 'modified') {
                         // 문서 수정
@@ -525,16 +529,21 @@ function loadItems() {
                         if (index !== -1) {
                             items[index] = docData;
                             modifiedCount++;
+                            console.log(`✏️ 물품 수정: "${docData.itemName}"`);
                         }
                     } else if (change.type === 'removed') {
                         // 문서 삭제
+                        const beforeLength = items.length;
                         items = items.filter(item => item.id !== docData.id);
-                        removedCount++;
+                        if (items.length < beforeLength) {
+                            removedCount++;
+                            console.log(`🗑️ 물품 삭제: "${docData.itemName}"`);
+                        }
                     }
                 });
                 
                 if (addedCount > 0 || modifiedCount > 0 || removedCount > 0) {
-                    console.log(`🔄 변경사항: ➕${addedCount} ✏️${modifiedCount} 🗑️${removedCount} (총 읽기 ${addedCount + modifiedCount + removedCount}회)`);
+                    console.log(`🔄 변경사항 총계: ➕${addedCount} ✏️${modifiedCount} 🗑️${removedCount} (총 읽기 ${addedCount + modifiedCount + removedCount}회)`);
                 }
             }
             
@@ -555,6 +564,20 @@ function loadItems() {
 
 // 물품 목록 표시
 function displayItems(itemsToShow) {
+    // 🔥 중요: currentUser 확인
+    if (!currentUser) {
+        console.error('⚠️ displayItems 호출 시 currentUser가 없습니다!');
+        itemList.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">⚠️</div>
+                <div class="empty-state-text">사용자 정보를 불러오는 중...</div>
+            </div>
+        `;
+        return;
+    }
+    
+    console.log(`📋 물품 목록 표시: ${itemsToShow.length}개 | 현재 사용자: ${currentUser.uid} | 역할: ${currentUserRole}`);
+    
     if (itemsToShow.length === 0) {
         itemList.innerHTML = `
             <div class="empty-state">
@@ -843,8 +866,17 @@ async function handleAddItem(e) {
     data.userEmail = currentUser.email;
     data.timestamp = firebase.firestore.FieldValue.serverTimestamp();
     
+    // 🔍 디버깅: 등록할 데이터 확인
+    console.log('📝 물품 등록 시도:', {
+        물품명: data.itemName,
+        userId: data.userId,
+        userEmail: data.userEmail,
+        현재사용자: currentUser.uid
+    });
+    
     try {
-        await db.collection('items').add(data);
+        const docRef = await db.collection('items').add(data);
+        console.log('✅ 물품 등록 완료! 문서ID:', docRef.id);
         showToast('물품이 등록되었습니다', 'success');
         
         if (continuousMode) {
