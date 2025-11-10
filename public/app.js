@@ -58,11 +58,32 @@ auth.onAuthStateChanged(async (user) => {
 // 사용자 역할 초기화
 async function initUserRole() {
     try {
-        const userDoc = await db.collection('users').doc(currentUser.uid).get();
+        // 🚀 캐시 확인 (5분 유효)
+        const cacheKey = `userRole_${currentUser.uid}`;
+        const cacheTimeKey = `userRole_${currentUser.uid}_time`;
+        const cachedRole = localStorage.getItem(cacheKey);
+        const cacheTime = localStorage.getItem(cacheTimeKey);
+        
+        if (cachedRole && cacheTime) {
+            const age = Date.now() - parseInt(cacheTime);
+            if (age < 5 * 60 * 1000) { // 5분 이내
+                currentUserRole = cachedRole;
+                console.log('✅ 사용자 역할 캐시에서 로드 (읽기 0회):', currentUserRole);
+                return;
+            }
+        }
+        
+        // 캐시가 없거나 만료됨 - Firestore에서 읽기
+        console.log('📥 사용자 역할 Firestore에서 읽기...');
+        const userDoc = await db.collection('users').doc(currentUser.uid).get({ source: 'default' });
         
         if (userDoc.exists) {
             // 기존 사용자
             currentUserRole = userDoc.data().role || 'user';
+            
+            // 캐시 저장
+            localStorage.setItem(cacheKey, currentUserRole);
+            localStorage.setItem(cacheTimeKey, Date.now().toString());
         } else {
             // 신규 사용자 - users 컬렉션에 추가
             // 첫 번째 사용자인지 확인
@@ -78,6 +99,10 @@ async function initUserRole() {
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             
+            // 캐시 저장
+            localStorage.setItem(cacheKey, currentUserRole);
+            localStorage.setItem(cacheTimeKey, Date.now().toString());
+            
             if (isFirstUser) {
                 showToast('첫 번째 사용자로 관리자 권한이 부여되었습니다', 'success');
             }
@@ -92,6 +117,12 @@ async function initUserRole() {
 logoutBtn.addEventListener('click', async () => {
     if (confirm('로그아웃 하시겠습니까?')) {
         try {
+            // 캐시 삭제
+            const cacheKey = `userRole_${currentUser.uid}`;
+            const cacheTimeKey = `userRole_${currentUser.uid}_time`;
+            localStorage.removeItem(cacheKey);
+            localStorage.removeItem(cacheTimeKey);
+            
             await auth.signOut();
             window.location.href = 'login.html';
         } catch (error) {
@@ -374,7 +405,16 @@ function switchTab(tabName) {
     if (tabName === 'dashboard') {
         updateDashboard();
     } else if (tabName === 'list') {
-        loadItems();
+        // 🔥 중요: 리스너가 없을 때만 등록 (중복 방지!)
+        if (!unsubscribe) {
+            console.log('⚠️ 리스너가 없어서 새로 등록합니다');
+            loadItems();
+        } else {
+            // 이미 로드된 데이터만 표시
+            console.log('✅ 기존 데이터 표시 (읽기 0회)');
+            displayItems(items);
+            updateItemCount();
+        }
     }
 }
 
@@ -435,7 +475,9 @@ function initEventListeners() {
 function loadItems() {
     // 이전 리스너 해제
     if (unsubscribe) {
+        console.log('⚠️ 기존 리스너 해제');
         unsubscribe();
+        unsubscribe = null;
     }
     
     // 로딩 표시
@@ -445,12 +487,14 @@ function loadItems() {
         itemList.innerHTML = '';
     }
     
+    console.log('🔄 실시간 리스너 등록 중...');
+    
     // 🚀 최적화된 실시간 리스너 (변경된 문서만 처리)
     unsubscribe = db.collection('items')
         .orderBy('timestamp', 'desc')
         .onSnapshot((snapshot) => {
-            // 초기 로드인지 확인
-            const isInitialLoad = items.length === 0;
+            // 초기 로드인지 확인 (더 정확한 체크)
+            const isInitialLoad = items.length === 0 && snapshot.docChanges().length === snapshot.docs.length;
             
             if (isInitialLoad) {
                 // 초기 로드: 모든 문서
@@ -464,6 +508,8 @@ function loadItems() {
                 console.log(`📥 초기 로드: ${items.length}개 문서 읽기`);
             } else {
                 // 🔥 핵심 최적화: 변경된 문서만 처리 (읽기 최소화!)
+                let addedCount = 0, modifiedCount = 0, removedCount = 0;
+                
                 snapshot.docChanges().forEach((change) => {
                     const docData = { id: change.doc.id, ...change.doc.data() };
                     
@@ -471,21 +517,25 @@ function loadItems() {
                         // 새 문서 추가 (중복 방지)
                         if (!items.find(item => item.id === docData.id)) {
                             items.unshift(docData);
-                            console.log('➕ 문서 추가 (읽기 1회)');
+                            addedCount++;
                         }
                     } else if (change.type === 'modified') {
                         // 문서 수정
                         const index = items.findIndex(item => item.id === docData.id);
                         if (index !== -1) {
                             items[index] = docData;
-                            console.log('✏️ 문서 수정 (읽기 1회)');
+                            modifiedCount++;
                         }
                     } else if (change.type === 'removed') {
                         // 문서 삭제
                         items = items.filter(item => item.id !== docData.id);
-                        console.log('🗑️ 문서 삭제 (읽기 1회)');
+                        removedCount++;
                     }
                 });
+                
+                if (addedCount > 0 || modifiedCount > 0 || removedCount > 0) {
+                    console.log(`🔄 변경사항: ➕${addedCount} ✏️${modifiedCount} 🗑️${removedCount} (총 읽기 ${addedCount + modifiedCount + removedCount}회)`);
+                }
             }
             
             // 로딩 숨기기
@@ -499,6 +549,8 @@ function loadItems() {
             if (listLoading) listLoading.style.display = 'none';
             showToast('데이터를 불러오는데 실패했습니다', 'error');
         });
+    
+    console.log('✅ 실시간 리스너 등록 완료');
 }
 
 // 물품 목록 표시
