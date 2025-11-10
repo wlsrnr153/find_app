@@ -154,6 +154,8 @@ function initApp() {
     
     // 조사자 이름 자동완성 (사용자 이름으로)
     document.getElementById('surveyor').value = currentUser.displayName || '';
+    // 갯수 기본값 설정
+    document.getElementById('quantity').value = '1';
 }
 
 // 역할별 UI 초기화
@@ -434,6 +436,7 @@ function initEventListeners() {
         } else {
             itemForm.reset();
             document.getElementById('surveyor').value = currentUser.displayName || '';
+            document.getElementById('quantity').value = '1'; // 갯수 기본값 1
         }
         showToast('폼이 초기화되었습니다', 'success');
     });
@@ -563,7 +566,12 @@ function loadItems() {
             // 로딩 숨기기
             if (listLoading) listLoading.style.display = 'none';
             
-            displayItems(items);
+            // 🔥 검색 상태 유지: 검색어가 있으면 필터링 적용
+            if (searchInput && (searchInput.value || filterCategory.value)) {
+                filterItems(); // 검색 필터 유지
+            } else {
+                displayItems(items);
+            }
             updateItemCount();
             updateDashboard();
         }, (error) => {
@@ -862,6 +870,11 @@ function resetFormKeepCommon() {
         }
     });
     
+    // 갯수가 복원되지 않았으면 기본값 1 설정
+    if (!commonValues['quantity']) {
+        document.getElementById('quantity').value = '1';
+    }
+    
     // 물품명 포커스
     document.getElementById('itemName').focus();
 }
@@ -892,7 +905,17 @@ async function handleAddItem(e) {
     try {
         const docRef = await db.collection('items').add(data);
         console.log('✅ 물품 등록 완료! 문서ID:', docRef.id);
-        showToast('물품이 등록되었습니다', 'success');
+        
+        // 🎉 물품 등록 알림 (더 명확하게)
+        showToast(`✅ "${data.itemName || '물품'}" 등록 완료!`, 'success');
+        
+        // 브라우저 알림 (선택사항 - 권한 있을 경우)
+        if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('물품 등록 완료', {
+                body: `${data.itemName || '물품'}이(가) 등록되었습니다.`,
+                icon: '/favicon.ico'
+            });
+        }
         
         if (continuousMode) {
             // 연속 등록 모드: 공통 항목 유지
@@ -901,6 +924,7 @@ async function handleAddItem(e) {
             // 일반 모드: 전체 초기화
             itemForm.reset();
             document.getElementById('surveyor').value = currentUser.displayName || '';
+            document.getElementById('quantity').value = '1'; // 갯수 기본값 1
         }
     } catch (error) {
         console.error('등록 오류:', error);
