@@ -574,10 +574,8 @@ function displayItems(itemsToShow) {
         const canDelete = currentUserRole === 'admin'; // 관리자만 삭제 가능
         const timestamp = item.timestamp ? item.timestamp.toDate() : new Date();
         
-        // 디버깅용 (콘솔에서 확인 가능)
-        if (window.DEBUG_MODE) {
-            console.log('물품:', item.itemName, '| userId:', item.userId, '| 현재 사용자:', currentUser?.uid, '| 수정 가능:', canEdit);
-        }
+        // 🔍 항상 권한 체크 로그 출력 (문제 해결용)
+        console.log(`[권한체크] 물품: "${item.itemName}" | 물품userId: "${item.userId}" | 현재사용자: "${currentUser?.uid}" | 역할: "${currentUserRole}" | 작성자: ${isOwner} | 소유자없음: ${hasNoOwner} | 수정가능: ${canEdit}`);
         
         return `
         <div class="item-card" data-id="${item.id}">
@@ -669,6 +667,10 @@ function displayItems(itemsToShow) {
             <div class="item-footer">
                 <div class="item-meta">
                     ${timestamp.toLocaleString('ko-KR')}
+                    <!-- 🔍 디버그 정보 (임시) -->
+                    <div style="font-size: 10px; color: var(--gray-500); margin-top: 5px;">
+                        작성자ID: ${item.userId || '없음'} | 내ID: ${currentUser?.uid || '없음'} | 역할: ${currentUserRole} | 수정가능: ${canEdit ? '✅' : '❌'}
+                    </div>
                 </div>
                 <div class="item-actions">
                     ${canEdit ? `
