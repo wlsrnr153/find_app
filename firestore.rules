@@ -24,7 +24,7 @@ service cloud.firestore {
                    (request.auth.uid == userId || isAdmin());
     }
     
-    // 물품 문서 - 로그인한 사용자는 모두 읽기, 관리자는 모든 수정/삭제
+    // 물품 문서 - 로그인한 사용자는 모두 읽기, 작성자는 수정, 관리자는 모든 수정/삭제
     match /items/{itemId} {
       // 로그인한 모든 사용자가 읽기 가능
       allow read: if request.auth != null;
@@ -34,10 +34,11 @@ service cloud.firestore {
                     && request.resource.data.userId == request.auth.uid
                     && request.resource.data.userEmail == request.auth.token.email;
       
-      // 관리자는 모든 물품 수정 가능
-      allow update: if request.auth != null && isAdmin();
+      // 관리자 또는 작성자만 수정 가능
+      allow update: if request.auth != null && 
+                    (isAdmin() || resource.data.userId == request.auth.uid);
       
-      // 관리자는 모든 물품 삭제 가능
+      // 관리자만 삭제 가능
       allow delete: if request.auth != null && isAdmin();
     }
   }
