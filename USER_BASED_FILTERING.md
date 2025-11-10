@@ -216,3 +216,4 @@ Firebase Console → Firestore Database → Indexes → 복합 인덱스 추가
 - 필요시 페이지 크기 조정 (50 → 100)
 - 캐시 시간 연장 고려
 
+

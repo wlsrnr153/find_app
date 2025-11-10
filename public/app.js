@@ -25,6 +25,7 @@ let currentPage = 1;
 let lastVisible = null;
 const ADMIN_PAGE_SIZE = 50; // 관리자는 50개씩
 let hasMorePages = true;
+let totalItemCount = 0; // 전체 데이터 개수 (페이지와 무관)
 
 // 🚀 Firebase 오프라인 지속성 활성화 (읽기 최적화)
 db.enablePersistence({ synchronizeTabs: true })
@@ -483,6 +484,32 @@ function initEventListeners() {
     });
 }
 
+// 전체 데이터 개수 가져오기 (count 쿼리 사용 - 효율적)
+async function loadTotalCount() {
+    try {
+        let countQuery = db.collection('items');
+        
+        // 일반 사용자는 본인 데이터만 카운트
+        if (currentUserRole !== 'admin') {
+            countQuery = countQuery.where('userId', '==', currentUser.uid);
+        }
+        
+        // count() 사용: 실제 문서를 읽지 않고 개수만 가져옴 (읽기 1회만 발생)
+        const snapshot = await countQuery.count().get();
+        totalItemCount = snapshot.data().count;
+        
+        console.log(`📊 전체 데이터 개수: ${totalItemCount}개 (count 쿼리 - 읽기 1회)`);
+        totalReads += 1; // count 쿼리는 읽기 1회로 계산됨
+        
+        updateItemCount();
+    } catch (error) {
+        console.error('전체 개수 로드 오류:', error);
+        // count() API를 지원하지 않는 경우 폴백
+        totalItemCount = items.length;
+        updateItemCount();
+    }
+}
+
 // Firestore에서 물품 목록 실시간 로드 (역할별 최적화)
 function loadItems() {
     // 🔥 핵심: 리스너가 이미 등록되어 있으면 절대 재등록하지 않음!
@@ -495,6 +522,9 @@ function loadItems() {
         }
         return;
     }
+    
+    // 전체 개수 로드 (페이지네이션과 무관)
+    loadTotalCount();
     
     console.log('🔄 실시간 리스너 등록 중... (역할별 필터링)');
     
@@ -594,6 +624,11 @@ function loadItems() {
                     totalReads += changeReads;
                     console.log(`🔄 변경사항 총계: ➕${addedCount} ✏️${modifiedCount} 🗑️${removedCount} (읽기 ${changeReads}회)`);
                     console.log(`📊 총 읽기 횟수: ${totalReads}회 (세션 시작 후 ${Math.floor((Date.now() - sessionStart) / 1000)}초)`);
+                    
+                    // 데이터 변경 시 전체 개수 업데이트 (추가/삭제만)
+                    if (addedCount > 0 || removedCount > 0) {
+                        loadTotalCount();
+                    }
                 }
             }
             
@@ -770,7 +805,13 @@ function displayItems(itemsToShow) {
 
 // 물품 수 업데이트
 function updateItemCount() {
-    itemCount.textContent = `총 ${items.length}개 물품`;
+    if (totalItemCount > 0) {
+        // 관리자/일반 사용자 모두: 전체 개수만 표시
+        itemCount.textContent = `총 ${totalItemCount}개 물품`;
+    } else {
+        // 로딩 중이거나 데이터가 없는 경우
+        itemCount.textContent = `총 ${items.length}개 물품`;
+    }
 }
 
 // 연속 등록 모드 초기화
@@ -1353,8 +1394,8 @@ function updateDashboard() {
     dashboardContent.style.display = 'none';
     
     setTimeout(() => {
-        // 통계 계산
-        const totalItems = items.length;
+        // 통계 계산 - 전체 개수가 있으면 사용, 없으면 현재 items 사용
+        const totalItems = totalItemCount > 0 ? totalItemCount : items.length;
         const goodCondition = items.filter(item => 
             item.condition === '매우 좋음' || item.condition === '좋음'
         ).length;
