@@ -232,8 +232,13 @@ async function loadItemsFromCache() {
                     } : null
                 }));
                 
-                displayItems(items);
-                updateItemCount();
+                // 함수가 정의된 경우에만 호출 (app.js 로드 후)
+                if (typeof displayItems === 'function') {
+                    displayItems(items);
+                }
+                if (typeof updateItemCount === 'function') {
+                    updateItemCount();
+                }
                 console.log(`✅ IndexedDB에서 ${items.length}개 항목 로드 (Firebase 읽기 0회)`);
                 return true;
             }
@@ -252,8 +257,13 @@ async function loadItemsFromCache() {
                     } : null
                 }));
                 
-                displayItems(items);
-                updateItemCount();
+                // 함수가 정의된 경우에만 호출 (app.js 로드 후)
+                if (typeof displayItems === 'function') {
+                    displayItems(items);
+                }
+                if (typeof updateItemCount === 'function') {
+                    updateItemCount();
+                }
                 console.log(`✅ localStorage에서 ${items.length}개 항목 로드 (Firebase 읽기 0회)`);
                 return true;
             }
@@ -415,13 +425,22 @@ function loadItemsOptimized() {
             
             if (listLoading) listLoading.style.display = 'none';
             
-            displayItems(items);
-            updateItemCount();
-            updateDashboard();
+            // 함수가 정의된 경우에만 호출 (app.js 로드 후)
+            if (typeof displayItems === 'function') {
+                displayItems(items);
+            }
+            if (typeof updateItemCount === 'function') {
+                updateItemCount();
+            }
+            if (typeof updateDashboard === 'function') {
+                updateDashboard();
+            }
         }, (error) => {
             console.error('❌ 데이터 로드 오류:', error);
             if (listLoading) listLoading.style.display = 'none';
-            showToast('데이터를 불러오는데 실패했습니다', 'error');
+            if (typeof showToast === 'function') {
+                showToast('데이터를 불러오는데 실패했습니다', 'error');
+            }
         });
 }
 
@@ -446,15 +465,25 @@ async function manualRefresh() {
         // 디바운스된 캐시 저장
         debouncedSaveCache(items);
         
-        displayItems(items);
-        updateItemCount();
-        updateDashboard();
-        
-        showToast('데이터를 새로고침했습니다', 'success');
+        // 함수가 정의된 경우에만 호출 (app.js 로드 후)
+        if (typeof displayItems === 'function') {
+            displayItems(items);
+        }
+        if (typeof updateItemCount === 'function') {
+            updateItemCount();
+        }
+        if (typeof updateDashboard === 'function') {
+            updateDashboard();
+        }
+        if (typeof showToast === 'function') {
+            showToast('데이터를 새로고침했습니다', 'success');
+        }
         console.log(`🔄 수동 새로고침: ${items.length}개 문서 (Firebase 읽기 ${items.length}회)`);
     } catch (error) {
         console.error('❌ 새로고침 오류:', error);
-        showToast('새로고침에 실패했습니다', 'error');
+        if (typeof showToast === 'function') {
+            showToast('새로고침에 실패했습니다', 'error');
+        }
     } finally {
         if (listLoading) listLoading.style.display = 'none';
     }
@@ -480,7 +509,9 @@ async function clearAllCache() {
         }
         
         console.log('✅ 모든 캐시 삭제 완료');
-        showToast('캐시가 삭제되었습니다', 'success');
+        if (typeof showToast === 'function') {
+            showToast('캐시가 삭제되었습니다', 'success');
+        }
     } catch (error) {
         console.error('❌ 캐시 삭제 오류:', error);
     }

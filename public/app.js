@@ -658,9 +658,33 @@ function loadItems() {
             updateItemCount();
             updateDashboard();
         }, (error) => {
-            console.error('데이터 로드 오류:', error);
+            console.error('❌ 데이터 로드 오류:', error);
+            console.error('오류 상세:', {
+                code: error.code,
+                message: error.message,
+                name: error.name
+            });
+            
             if (listLoading) listLoading.style.display = 'none';
-            showToast('데이터를 불러오는데 실패했습니다', 'error');
+            
+            // 더 상세한 오류 메시지
+            let errorMessage = '데이터를 불러오는데 실패했습니다';
+            
+            if (error.code === 'permission-denied') {
+                errorMessage = '권한이 없습니다. 관리자에게 문의하세요.';
+            } else if (error.code === 'unavailable') {
+                errorMessage = '네트워크 연결을 확인해주세요.';
+            } else if (error.code === 'failed-precondition') {
+                errorMessage = '인덱스 생성 중입니다. 잠시 후 다시 시도해주세요.';
+            } else if (error.message && error.message.includes('toDate')) {
+                errorMessage = '데이터 형식 오류 - 캐시를 삭제하고 다시 시도해주세요.';
+                // 자동으로 캐시 삭제
+                localStorage.removeItem('items_cache');
+                localStorage.removeItem('items_cache_timestamp');
+                console.log('🔄 캐시 자동 삭제 완료');
+            }
+            
+            showToast(errorMessage, 'error');
         });
     
     // 🔥 리스너 등록 플래그 설정 - 절대 재등록 안 함!
@@ -701,7 +725,30 @@ function displayItems(itemsToShow) {
         const hasNoOwner = !item.userId;
         const canEdit = currentUserRole === 'admin' || isOwner || hasNoOwner;
         const canDelete = currentUserRole === 'admin'; // 관리자만 삭제 가능
-        const timestamp = item.timestamp ? item.timestamp.toDate() : new Date();
+        
+        // 🔧 개선된 Timestamp 처리 (방어적 코딩)
+        const timestamp = (() => {
+            if (!item.timestamp) return new Date();
+            
+            // Firestore Timestamp 객체인 경우
+            if (item.timestamp.toDate && typeof item.timestamp.toDate === 'function') {
+                return item.timestamp.toDate();
+            }
+            
+            // ISO 문자열인 경우 (캐시에서 로드)
+            if (typeof item.timestamp === 'string') {
+                return new Date(item.timestamp);
+            }
+            
+            // Date 객체인 경우
+            if (item.timestamp instanceof Date) {
+                return item.timestamp;
+            }
+            
+            // 그 외 (숫자, 객체 등)
+            console.warn('⚠️ 알 수 없는 timestamp 형식:', item.timestamp);
+            return new Date();
+        })();
         
         // 🔍 항상 권한 체크 로그 출력 (문제 해결용)
         console.log(`[권한체크] 물품: "${item.itemName}" | 물품userId: "${item.userId}" | 현재사용자: "${currentUser?.uid}" | 역할: "${currentUserRole}" | 작성자: ${isOwner} | 소유자없음: ${hasNoOwner} | 수정가능: ${canEdit}`);
