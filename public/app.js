@@ -225,20 +225,27 @@ async function initApp() {
 // 역할별 UI 초기화
 function initRoleBasedUI() {
     const userManagementSection = document.getElementById('userManagementSection');
+    const migrationSection = document.getElementById('migrationSection');
     const dangerZoneSection = document.getElementById('dangerZoneSection');
     
     if (currentUserRole === 'admin') {
-        // 관리자는 사용자 관리 섹션과 위험 영역 표시
+        // 관리자는 사용자 관리 섹션, 마이그레이션 섹션, 위험 영역 표시
         if (userManagementSection) {
             userManagementSection.style.display = 'block';
+        }
+        if (migrationSection) {
+            migrationSection.style.display = 'block';
         }
         if (dangerZoneSection) {
             dangerZoneSection.style.display = 'block';
         }
     } else {
-        // 일반 사용자는 사용자 관리 섹션과 위험 영역 숨김
+        // 일반 사용자는 사용자 관리 섹션, 마이그레이션 섹션, 위험 영역 숨김
         if (userManagementSection) {
             userManagementSection.style.display = 'none';
+        }
+        if (migrationSection) {
+            migrationSection.style.display = 'none';
         }
         if (dangerZoneSection) {
             dangerZoneSection.style.display = 'none';
@@ -533,6 +540,12 @@ function initEventListeners() {
         loadUsersBtn.addEventListener('click', loadUsers);
     }
     
+    // 데이터 마이그레이션 (관리자만)
+    const startMigrationBtn = document.getElementById('startMigrationBtn');
+    if (startMigrationBtn) {
+        startMigrationBtn.addEventListener('click', migrateUserIds);
+    }
+    
     // 모달 외부 클릭 시 닫기
     editModal.addEventListener('click', (e) => {
         if (e.target === editModal) {
@@ -567,6 +580,148 @@ async function loadTotalCount() {
     }
 }
 
+// 일반 사용자용 이중 쿼리 로드 (userId + userEmail 병합)
+async function loadItemsForUser() {
+    console.log('🔄 일반 사용자: 이중 쿼리 시작 (userId + userEmail)');
+    
+    const listLoading = document.getElementById('listLoading');
+    if (listLoading) {
+        listLoading.style.display = 'block';
+        itemList.innerHTML = '';
+    }
+    
+    try {
+        // 쿼리 1: userId로 조회 (본인이 작성한 데이터)
+        console.log('📥 쿼리 1: userId로 조회 중...');
+        const query1 = db.collection('items')
+            .where('userId', '==', currentUser.uid)
+            .orderBy('timestamp', 'desc');
+        
+        const snapshot1 = await query1.get();
+        totalReads += snapshot1.docs.length;
+        
+        // 쿼리 2: userEmail로 조회 (기존 데이터)
+        console.log('📥 쿼리 2: userEmail로 조회 중...');
+        const query2 = db.collection('items')
+            .where('userEmail', '==', currentUser.email)
+            .orderBy('timestamp', 'desc');
+        
+        const snapshot2 = await query2.get();
+        totalReads += snapshot2.docs.length;
+        
+        // 중복 제거하면서 병합
+        const itemsMap = new Map();
+        
+        snapshot1.forEach((doc) => {
+            itemsMap.set(doc.id, {
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+        
+        snapshot2.forEach((doc) => {
+            // 이미 존재하지 않는 경우만 추가 (중복 방지)
+            if (!itemsMap.has(doc.id)) {
+                itemsMap.set(doc.id, {
+                    id: doc.id,
+                    ...doc.data()
+                });
+            }
+        });
+        
+        items = Array.from(itemsMap.values());
+        
+        console.log(`✅ 이중 쿼리 완료: 총 ${items.length}개 항목 (쿼리1: ${snapshot1.docs.length}개, 쿼리2: ${snapshot2.docs.length}개, 중복제거 후: ${items.length}개)`);
+        console.log(`📊 총 읽기 횟수: ${totalReads}회`);
+        
+        // 정렬 적용
+        const sortedItems = sortItems(items, currentSort);
+        displayItems(sortedItems);
+        updateItemCount();
+        updateDashboard();
+        
+        if (listLoading) listLoading.style.display = 'none';
+        
+        // 🔥 이제 실시간 리스너 등록
+        setupUserRealtimeListener();
+        
+    } catch (error) {
+        console.error('❌ 이중 쿼리 오류:', error);
+        if (listLoading) listLoading.style.display = 'none';
+        showToast('데이터를 불러오는데 실패했습니다', 'error');
+    }
+}
+
+// 일반 사용자용 실시간 리스너 설정
+function setupUserRealtimeListener() {
+    if (isListenerRegistered) {
+        console.log('✅ 리스너가 이미 등록되어 있음');
+        return;
+    }
+    
+    console.log('🔄 일반 사용자: 실시간 리스너 등록 중...');
+    
+    // userId 기반 리스너만 등록 (새 데이터는 userId가 있음)
+    const query = db.collection('items')
+        .where('userId', '==', currentUser.uid)
+        .orderBy('timestamp', 'desc');
+    
+    unsubscribe = query.onSnapshot((snapshot) => {
+        // 변경사항만 처리
+        let addedCount = 0, modifiedCount = 0, removedCount = 0;
+        
+        snapshot.docChanges().forEach((change) => {
+            const docData = { id: change.doc.id, ...change.doc.data() };
+            
+            if (change.type === 'added') {
+                const existingIndex = items.findIndex(item => item.id === docData.id);
+                if (existingIndex === -1) {
+                    items.unshift(docData);
+                    addedCount++;
+                    console.log(`➕ 새 물품 추가: "${docData.itemName}"`);
+                }
+            } else if (change.type === 'modified') {
+                const index = items.findIndex(item => item.id === docData.id);
+                if (index !== -1) {
+                    items[index] = docData;
+                    modifiedCount++;
+                    console.log(`✏️ 물품 수정: "${docData.itemName}"`);
+                }
+            } else if (change.type === 'removed') {
+                const beforeLength = items.length;
+                items = items.filter(item => item.id !== docData.id);
+                if (items.length < beforeLength) {
+                    removedCount++;
+                    console.log(`🗑️ 물품 삭제: "${docData.itemName}"`);
+                }
+            }
+        });
+        
+        if (addedCount > 0 || modifiedCount > 0 || removedCount > 0) {
+            const changeReads = addedCount + modifiedCount + removedCount;
+            totalReads += changeReads;
+            console.log(`🔄 변경사항: ➕${addedCount} ✏️${modifiedCount} 🗑️${removedCount} (읽기 ${changeReads}회)`);
+            
+            // 화면 업데이트
+            if (searchInput && (searchInput.value || filterCategory.value)) {
+                filterItems();
+            } else {
+                const sortedItems = sortItems(items, currentSort);
+                displayItems(sortedItems);
+            }
+            updateItemCount();
+            updateDashboard();
+        }
+    }, (error) => {
+        console.error('❌ 실시간 리스너 오류:', error);
+        showToast('실시간 업데이트 연결에 실패했습니다', 'error');
+    });
+    
+    isListenerRegistered = true;
+    initialLoadComplete = true;
+    console.log('✅ 일반 사용자 실시간 리스너 등록 완료');
+}
+
 // Firestore에서 물품 목록 실시간 로드 (역할별 최적화)
 function loadItems() {
     // 🔥 핵심: 리스너가 이미 등록되어 있으면 절대 재등록하지 않음!
@@ -594,27 +749,36 @@ function loadItems() {
     }
     
     // 🔥 역할별 쿼리 생성
-    let query = db.collection('items');
-    
     if (currentUserRole === 'admin') {
-        // 👑 관리자: 전체 물품 (페이지네이션)
+        // 👑 관리자: 전체 물품 (페이지네이션) - 기존 로직 유지
         console.log(`👑 관리자: 전체 물품 로드 (${ADMIN_PAGE_SIZE}개씩)`);
-        query = query
-            .orderBy('timestamp', 'desc')
-            .limit(ADMIN_PAGE_SIZE);
         
         // 페이지네이션 UI 표시
         showPaginationControls();
+        
+        // 관리자 쿼리 계속 진행
+        let query = db.collection('items')
+            .orderBy('timestamp', 'desc')
+            .limit(ADMIN_PAGE_SIZE);
+        
+        // 🚀 최적화된 실시간 리스너 (변경된 문서만 처리) - 관리자용
+        setupAdminRealtimeListener(query);
     } else {
-        // 👤 일반 사용자: 본인 물품만 (전체)
-        console.log('👤 일반 사용자: 본인 물품만 로드');
-        query = query
-            .where('userId', '==', currentUser.uid)
-            .orderBy('timestamp', 'desc');
+        // 👤 일반 사용자: 이중 쿼리 방식 사용 (userId + userEmail)
+        console.log('👤 일반 사용자: 이중 쿼리 방식으로 전환');
         
         // 페이지네이션 UI 숨김
         hidePaginationControls();
+        
+        // 일반 사용자는 loadItemsForUser()로 처리
+        loadItemsForUser();
+        return; // 여기서 함수 종료
     }
+}
+
+// 관리자용 실시간 리스너 설정 (기존 로직)
+function setupAdminRealtimeListener(query) {
+    const listLoading = document.getElementById('listLoading');
     
     // 🚀 최적화된 실시간 리스너 (변경된 문서만 처리)
     unsubscribe = query.onSnapshot((snapshot) => {
@@ -1269,18 +1433,43 @@ function filterItems() {
 function sortItems(itemsToSort, sortType) {
     const sorted = [...itemsToSort];
     
+    // Timestamp를 Date 객체로 안전하게 변환하는 헬퍼 함수
+    const getTimestamp = (item) => {
+        if (!item.timestamp) return new Date(0);
+        
+        // Firestore Timestamp 객체인 경우
+        if (item.timestamp.toDate && typeof item.timestamp.toDate === 'function') {
+            return item.timestamp.toDate();
+        }
+        
+        // ISO 문자열인 경우 (캐시에서 로드)
+        if (typeof item.timestamp === 'string') {
+            return new Date(item.timestamp);
+        }
+        
+        // Date 객체인 경우
+        if (item.timestamp instanceof Date) {
+            return item.timestamp;
+        }
+        
+        // 그 외
+        return new Date(0);
+    };
+    
     switch(sortType) {
         case 'newest':
+            // 최신순: 최근 항목이 위로
             sorted.sort((a, b) => {
-                const timeA = a.timestamp ? a.timestamp.toDate() : new Date(0);
-                const timeB = b.timestamp ? b.timestamp.toDate() : new Date(0);
+                const timeA = getTimestamp(a);
+                const timeB = getTimestamp(b);
                 return timeB - timeA;
             });
             break;
         case 'oldest':
+            // 오래된 순: 오래된 항목이 위로
             sorted.sort((a, b) => {
-                const timeA = a.timestamp ? a.timestamp.toDate() : new Date(0);
-                const timeB = b.timestamp ? b.timestamp.toDate() : new Date(0);
+                const timeA = getTimestamp(a);
+                const timeB = getTimestamp(b);
                 return timeA - timeB;
             });
             break;
@@ -1729,6 +1918,153 @@ async function toggleUserRole(userId, currentRole) {
 }
 
 // ===============================================
+// 🔄 데이터 마이그레이션 함수
+// ===============================================
+
+// userId가 없는 데이터에 userId 자동 추가 (관리자 전용)
+async function migrateUserIds() {
+    if (currentUserRole !== 'admin') {
+        showToast('관리자만 사용할 수 있습니다', 'error');
+        return;
+    }
+    
+    const progressDiv = document.getElementById('migrationProgress');
+    const statusDiv = document.getElementById('migrationStatus');
+    const progressBar = document.getElementById('migrationProgressBar');
+    const startBtn = document.getElementById('startMigrationBtn');
+    
+    if (!confirm('데이터 마이그레이션을 시작하시겠습니까?\n\nuserEmail을 기준으로 userId를 자동으로 추가합니다.')) {
+        return;
+    }
+    
+    try {
+        // UI 초기화
+        statusDiv.style.display = 'block';
+        startBtn.disabled = true;
+        progressDiv.textContent = '데이터 조회 중...';
+        progressBar.style.width = '0%';
+        
+        console.log('🔄 마이그레이션 시작...');
+        
+        // 1단계: userId가 없는 문서 조회
+        const itemsWithoutUserId = await db.collection('items')
+            .where('userId', '==', null)
+            .get();
+        
+        // userId 필드가 아예 없는 경우도 찾기 위한 전체 조회
+        const allItems = await db.collection('items').get();
+        const itemsNeedingMigration = [];
+        
+        allItems.forEach((doc) => {
+            const data = doc.data();
+            if (!data.userId && data.userEmail) {
+                itemsNeedingMigration.push({
+                    id: doc.id,
+                    email: data.userEmail,
+                    data: data
+                });
+            }
+        });
+        
+        const totalCount = itemsNeedingMigration.length;
+        
+        if (totalCount === 0) {
+            progressDiv.textContent = '✅ 마이그레이션이 필요한 데이터가 없습니다';
+            progressBar.style.width = '100%';
+            showToast('모든 데이터에 userId가 있습니다', 'success');
+            startBtn.disabled = false;
+            return;
+        }
+        
+        console.log(`📋 마이그레이션 대상: ${totalCount}개`);
+        progressDiv.textContent = `총 ${totalCount}개 항목 발견. 사용자 매칭 중...`;
+        
+        // 2단계: users 컬렉션에서 이메일-userId 매핑 생성
+        const usersSnapshot = await db.collection('users').get();
+        const emailToUserIdMap = new Map();
+        
+        usersSnapshot.forEach((doc) => {
+            const userData = doc.data();
+            if (userData.email) {
+                emailToUserIdMap.set(userData.email, doc.id);
+            }
+        });
+        
+        console.log(`👥 등록된 사용자: ${emailToUserIdMap.size}명`);
+        
+        // 3단계: 배치 업데이트 (500개씩)
+        let updatedCount = 0;
+        let skippedCount = 0;
+        let errorCount = 0;
+        const BATCH_SIZE = 500; // Firestore 배치 제한
+        
+        for (let i = 0; i < itemsNeedingMigration.length; i += BATCH_SIZE) {
+            const batch = db.batch();
+            const batchItems = itemsNeedingMigration.slice(i, i + BATCH_SIZE);
+            
+            batchItems.forEach((item) => {
+                const userId = emailToUserIdMap.get(item.email);
+                
+                if (userId) {
+                    const docRef = db.collection('items').doc(item.id);
+                    batch.update(docRef, {
+                        userId: userId,
+                        migratedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    updatedCount++;
+                } else {
+                    console.warn(`⚠️ 사용자를 찾을 수 없음: ${item.email}`);
+                    skippedCount++;
+                }
+            });
+            
+            // 배치 커밋
+            try {
+                await batch.commit();
+                
+                // 진행률 업데이트
+                const progress = Math.min(100, Math.floor(((i + batchItems.length) / totalCount) * 100));
+                progressBar.style.width = `${progress}%`;
+                progressDiv.textContent = `진행 중... ${i + batchItems.length}/${totalCount} (${progress}%)`;
+                
+                console.log(`✅ 배치 ${Math.floor(i / BATCH_SIZE) + 1} 완료: ${batchItems.length}개 업데이트`);
+            } catch (error) {
+                console.error(`❌ 배치 오류:`, error);
+                errorCount += batchItems.length;
+            }
+        }
+        
+        // 완료 메시지
+        progressBar.style.width = '100%';
+        progressDiv.innerHTML = `
+            <strong>✅ 마이그레이션 완료!</strong><br>
+            <span style="font-size: 13px; margin-top: 4px; display: block;">
+                • 업데이트: ${updatedCount}개<br>
+                • 건너뜀: ${skippedCount}개 (사용자 없음)<br>
+                ${errorCount > 0 ? `• 오류: ${errorCount}개<br>` : ''}
+            </span>
+        `;
+        
+        showToast(`마이그레이션 완료: ${updatedCount}개 업데이트`, 'success');
+        console.log('🎉 마이그레이션 완료!', { updatedCount, skippedCount, errorCount });
+        
+        // 데이터 새로고침
+        if (updatedCount > 0) {
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+        }
+        
+    } catch (error) {
+        console.error('❌ 마이그레이션 오류:', error);
+        progressDiv.innerHTML = `<strong>❌ 오류 발생:</strong> ${error.message}`;
+        showToast('마이그레이션 중 오류가 발생했습니다', 'error');
+    } finally {
+        startBtn.disabled = false;
+    }
+}
+
+// ===============================================
 // 📄 페이지네이션 함수 (관리자 전용)
 // ===============================================
 
@@ -1854,5 +2190,6 @@ window.deleteItem = deleteItem;
 window.switchTab = switchTab;
 window.deleteOrganization = deleteOrganization;
 window.toggleUserRole = toggleUserRole;
+window.migrateUserIds = migrateUserIds;
 window.loadNextPage = loadNextPage;
 window.goToFirstPage = goToFirstPage;

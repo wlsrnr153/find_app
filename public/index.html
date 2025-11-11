@@ -422,6 +422,30 @@
                 </div>
             </div>
 
+            <!-- 데이터 마이그레이션 섹션 (관리자 전용) -->
+            <div class="manage-section" id="migrationSection" style="display: none;">
+                <h2>🔄 데이터 마이그레이션</h2>
+                <p>userId가 없는 기존 데이터를 userEmail 기준으로 자동 매칭합니다</p>
+                <div style="background: var(--info-bg, #e3f2fd); padding: 12px; border-radius: 8px; margin: 12px 0; border-left: 4px solid var(--info, #2196f3);">
+                    <strong>ℹ️ 안내:</strong>
+                    <ul style="margin: 8px 0 0 20px; font-size: 14px;">
+                        <li>기존 데이터에 자동으로 userId를 추가합니다</li>
+                        <li>userEmail을 기준으로 사용자를 매칭합니다</li>
+                        <li>매칭된 데이터만 업데이트됩니다</li>
+                        <li>한 번만 실행하면 됩니다</li>
+                    </ul>
+                </div>
+                <button class="btn btn-primary" id="startMigrationBtn">🚀 마이그레이션 시작</button>
+                <div id="migrationStatus" style="margin-top: 16px; padding: 12px; background: var(--bg-secondary); border-radius: 8px; display: none;">
+                    <div id="migrationProgress" style="font-size: 14px; color: var(--text-secondary);">
+                        준비 중...
+                    </div>
+                    <div style="width: 100%; height: 8px; background: var(--bg-tertiary); border-radius: 4px; margin-top: 8px; overflow: hidden;">
+                        <div id="migrationProgressBar" style="width: 0%; height: 100%; background: var(--primary); transition: width 0.3s;"></div>
+                    </div>
+                </div>
+            </div>
+
             <div class="manage-section">
                 <h2>📥 데이터 가져오기</h2>
                 <p>엑셀(.xlsx) 또는 JSON 파일을 업로드하세요</p>
