@@ -197,8 +197,9 @@ async function initApp() {
                 // 🔥 중요: 캐시에서 로드했으므로 초기 로드 완료로 표시
                 initialLoadComplete = true;
                 
-                // 즉시 화면에 표시
-                displayItems(items);
+                // 즉시 화면에 표시 (정렬 적용)
+                const sortedItems = sortItems(items, currentSort);
+                displayItems(sortedItems);
                 updateItemCount();
                 
                 console.log('✅ 캐시 데이터 표시 완료 - Firebase 동기화 시작 (변경사항만 감지)');
@@ -571,9 +572,10 @@ function loadItems() {
     // 🔥 핵심: 리스너가 이미 등록되어 있으면 절대 재등록하지 않음!
     if (isListenerRegistered) {
         console.log('✅ 리스너가 이미 등록되어 있음 (읽기 0회)');
-        // 데이터만 다시 표시
+        // 데이터만 다시 표시 (정렬 적용)
         if (items.length > 0) {
-            displayItems(items);
+            const sortedItems = sortItems(items, currentSort);
+            displayItems(sortedItems);
             updateItemCount();
         }
         return;
@@ -716,8 +718,10 @@ function loadItems() {
                 console.log(`🔍 검색 필터 적용 중...`);
                 filterItems(); // 검색 필터 유지
             } else {
-                console.log(`📋 전체 목록 표시 중...`);
-                displayItems(items);
+                console.log(`📋 전체 목록 표시 중... (정렬: ${currentSort})`);
+                // 🔥 정렬 적용: 최신순으로 표시
+                const sortedItems = sortItems(items, currentSort);
+                displayItems(sortedItems);
             }
             updateItemCount();
             updateDashboard();
@@ -1765,7 +1769,9 @@ async function loadNextPage() {
         hasMorePages = snapshot.docs.length === ADMIN_PAGE_SIZE;
         currentPage++;
         
-        displayItems(items);
+        // 정렬 적용 후 표시
+        const sortedItems = sortItems(items, currentSort);
+        displayItems(sortedItems);
         updateItemCount();
         updatePaginationUI();
         
