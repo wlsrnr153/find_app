@@ -1,47 +1,32 @@
-// Firebase 기반 물품 조사 시스템 - 최적화 버전
+// ============================================
+// 📦 IndexedDB 캐싱 모듈 (app-optimized.js)
+// ============================================
+// 
+// ⚠️ 중요: 이 파일은 순수하게 캐시 관련 함수만 제공합니다
+// 전역 변수, Firebase 초기화, DOM 조작 등은 app.js에서 처리됩니다
+//
+// 제공 함수:
+// - initIndexedDB(): IndexedDB 초기화
+// - loadItemsFromCache(): 캐시에서 데이터 로드
+// - saveItemsToCache(): 캐시에 데이터 저장
+// - debouncedSaveCache(): 디바운스된 캐시 저장
+// - clearAllCache(): 모든 캐시 삭제
+// ============================================
 
-// 전역 상태
-let items = [];
-let currentUser = null;
-let currentUserRole = 'user';
-let currentEditId = null;
-let unsubscribe = null;
-let currentSort = 'newest';
-let continuousMode = false;
-let selectedFields = ['surveyor', 'organization', 'location', 'itemName', 'assetNumber', 'quantity'];
-let organizations = [];
-let currentOrganization = '';
-
-// 캐시 설정
+// 캐시 설정 (로컬 스코프)
 const CACHE_KEY = 'items_cache';
 const CACHE_TIMESTAMP_KEY = 'items_cache_timestamp';
 const CACHE_DURATION = 5 * 60 * 1000; // 5분
 
-// IndexedDB 설정
+// IndexedDB 설정 (로컬 스코프)
 let indexedDB_instance = null;
 const DB_NAME = 'ItemsSurveyDB';
 const STORE_NAME = 'items';
 const DB_VERSION = 1;
 
-// 초기 로드 완료 플래그 (버그 수정용)
-let initialLoadComplete = false;
-
-// 디바운스 타이머
+// 디바운스 타이머 (로컬 스코프)
 let cacheUpdateTimer = null;
 const CACHE_UPDATE_DEBOUNCE = 2000; // 2초
-
-// Firebase 오프라인 지속성 활성화 (중요!)
-db.enablePersistence({ synchronizeTabs: true })
-    .catch((err) => {
-        if (err.code == 'failed-precondition') {
-            console.warn('여러 탭이 열려 있어 오프라인 지속성이 비활성화됩니다.');
-        } else if (err.code == 'unimplemented') {
-            console.warn('브라우저가 오프라인 지속성을 지원하지 않습니다.');
-        }
-    });
-
-// ⚠️ 주의: app-optimized.js는 순수하게 캐시 관련 함수만 제공합니다
-// DOM 선택, 인증, 초기화 등은 모두 app.js에서 처리됩니다
 
 // ============================================
 // 🚀 최적화된 데이터 로드 함수
@@ -86,86 +71,92 @@ function initIndexedDB() {
 }
 
 // 캐시에서 데이터 로드 (IndexedDB 우선, localStorage 폴백)
+// 반환: { success: boolean, data: Array }
 async function loadItemsFromCache() {
-    try {
-        const cacheTimestamp = localStorage.getItem(CACHE_TIMESTAMP_KEY);
-        
-        if (!cacheTimestamp) {
-            console.log('ℹ️ 캐시 타임스탬프 없음');
-            return false;
-        }
-        
-        const cacheAge = Date.now() - parseInt(cacheTimestamp);
-        if (cacheAge >= CACHE_DURATION) {
-            console.log('⏰ 캐시 만료됨 (경과 시간:', Math.floor(cacheAge / 1000), '초)');
-            return false;
-        }
-        
-        // 1순위: IndexedDB에서 로드 시도
-        try {
-            const database = await initIndexedDB();
-            const transaction = database.transaction([STORE_NAME], 'readonly');
-            const objectStore = transaction.objectStore(STORE_NAME);
-            const request = objectStore.getAll();
-            
-            const cachedData = await new Promise((resolve, reject) => {
-                request.onsuccess = () => resolve(request.result);
-                request.onerror = () => reject(request.error);
-            });
-            
-            if (cachedData && cachedData.length > 0) {
-                // Timestamp 복원 (Date → Firestore Timestamp 호환 객체)
-                items = cachedData.map(item => ({
-                    ...item,
-                    timestamp: item.timestamp ? {
-                        toDate: () => new Date(item.timestamp)
-                    } : null
-                }));
-                
-                // 함수가 정의된 경우에만 호출 (app.js 로드 후)
-                if (typeof displayItems === 'function') {
-                    displayItems(items);
-                }
-                if (typeof updateItemCount === 'function') {
-                    updateItemCount();
-                }
-                console.log(`✅ IndexedDB에서 ${items.length}개 항목 로드 (Firebase 읽기 0회)`);
-                return true;
-            }
-        } catch (indexedDBError) {
-            console.warn('⚠️ IndexedDB 로드 실패, localStorage로 폴백:', indexedDBError);
-            
-            // 2순위: localStorage 폴백
-            const cachedData = localStorage.getItem(CACHE_KEY);
-            if (cachedData) {
-                const parsedData = JSON.parse(cachedData);
-                
-                items = parsedData.map(item => ({
-                    ...item,
-                    timestamp: item.timestamp ? {
-                        toDate: () => new Date(item.timestamp)
-                    } : null
-                }));
-                
-                // 함수가 정의된 경우에만 호출 (app.js 로드 후)
-                if (typeof displayItems === 'function') {
-                    displayItems(items);
-                }
-                if (typeof updateItemCount === 'function') {
-                    updateItemCount();
-                }
-                console.log(`✅ localStorage에서 ${items.length}개 항목 로드 (Firebase 읽기 0회)`);
-                return true;
-            }
-        }
-    } catch (error) {
-        console.error('❌ 캐시 로드 오류:', error);
-        // 손상된 캐시 정리
-        localStorage.removeItem(CACHE_KEY);
-        localStorage.removeItem(CACHE_TIMESTAMP_KEY);
-    }
+    // 🔥 Timeout 설정 (5초 후 자동 실패)
+    const timeoutPromise = new Promise((resolve) => {
+        setTimeout(() => {
+            console.warn('⏱️ 캐시 로드 타임아웃 (5초)');
+            resolve({ success: false, data: [] });
+        }, 5000);
+    });
     
-    return false;
+    const loadPromise = (async () => {
+        try {
+            const cacheTimestamp = localStorage.getItem(CACHE_TIMESTAMP_KEY);
+            
+            if (!cacheTimestamp) {
+                console.log('ℹ️ 캐시 타임스탬프 없음');
+                return { success: false, data: [] };
+            }
+            
+            const cacheAge = Date.now() - parseInt(cacheTimestamp);
+            if (cacheAge >= CACHE_DURATION) {
+                console.log('⏰ 캐시 만료됨 (경과 시간:', Math.floor(cacheAge / 1000), '초)');
+                return { success: false, data: [] };
+            }
+            
+            // 1순위: IndexedDB에서 로드 시도
+            try {
+                const database = await initIndexedDB();
+                const transaction = database.transaction([STORE_NAME], 'readonly');
+                const objectStore = transaction.objectStore(STORE_NAME);
+                const request = objectStore.getAll();
+                
+                const cachedData = await new Promise((resolve, reject) => {
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                    // Timeout 추가
+                    setTimeout(() => reject(new Error('IndexedDB timeout')), 3000);
+                });
+                
+                if (cachedData && cachedData.length > 0) {
+                    // Timestamp 복원 (Date → Firestore Timestamp 호환 객체)
+                    const restoredData = cachedData.map(item => ({
+                        ...item,
+                        timestamp: item.timestamp ? {
+                            toDate: () => new Date(item.timestamp)
+                        } : null
+                    }));
+                    
+                    console.log(`✅ IndexedDB에서 ${restoredData.length}개 항목 로드 (Firebase 읽기 0회)`);
+                    return { success: true, data: restoredData };
+                }
+            } catch (indexedDBError) {
+                console.warn('⚠️ IndexedDB 로드 실패, localStorage로 폴백:', indexedDBError);
+                
+                // 2순위: localStorage 폴백
+                const cachedData = localStorage.getItem(CACHE_KEY);
+                if (cachedData) {
+                    const parsedData = JSON.parse(cachedData);
+                    
+                    const restoredData = parsedData.map(item => ({
+                        ...item,
+                        timestamp: item.timestamp ? {
+                            toDate: () => new Date(item.timestamp)
+                        } : null
+                    }));
+                    
+                    console.log(`✅ localStorage에서 ${restoredData.length}개 항목 로드 (Firebase 읽기 0회)`);
+                    return { success: true, data: restoredData };
+                }
+            }
+        } catch (error) {
+            console.error('❌ 캐시 로드 오류:', error);
+            // 손상된 캐시 정리
+            try {
+                localStorage.removeItem(CACHE_KEY);
+                localStorage.removeItem(CACHE_TIMESTAMP_KEY);
+            } catch (e) {
+                // localStorage 접근 실패 무시
+            }
+        }
+        
+        return { success: false, data: [] };
+    })();
+    
+    // 타임아웃과 로드를 경쟁시킴 (먼저 완료되는 것 사용)
+    return Promise.race([loadPromise, timeoutPromise]);
 }
 
 // 캐시에 데이터 저장 (IndexedDB 우선, localStorage 폴백)

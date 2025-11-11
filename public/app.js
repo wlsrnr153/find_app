@@ -56,16 +56,27 @@ auth.onAuthStateChanged(async (user) => {
     if (user) {
         currentUser = user;
         
-        // 사용자 역할 확인 및 초기화
-        await initUserRole();
+        console.log('✅ 사용자 인증 완료:', user.email);
         
-        const roleEmoji = currentUserRole === 'admin' ? '👑' : '👤';
-        const roleText = currentUserRole === 'admin' ? ' (관리자)' : '';
-        userName.textContent = `${roleEmoji} ${user.displayName || user.email}${roleText}`;
-        
-        initApp();
+        try {
+            // 사용자 역할 확인 및 초기화
+            await initUserRole();
+            
+            const roleEmoji = currentUserRole === 'admin' ? '👑' : '👤';
+            const roleText = currentUserRole === 'admin' ? ' (관리자)' : '';
+            userName.textContent = `${roleEmoji} ${user.displayName || user.email}${roleText}`;
+            
+            // 🔥 initApp()을 await로 호출하여 완료될 때까지 대기
+            await initApp();
+            
+            console.log('✅ 앱 로딩 완전히 완료');
+        } catch (error) {
+            console.error('❌ 앱 초기화 중 오류:', error);
+            showToast('앱 초기화에 실패했습니다. 페이지를 새로고침해주세요.', 'error');
+        }
     } else {
         // 로그인 페이지로 리다이렉트
+        console.log('⚠️ 미인증 사용자 - 로그인 페이지로 이동');
         window.location.href = 'login.html';
     }
 });
@@ -166,29 +177,45 @@ logoutBtn.addEventListener('click', async () => {
 
 // 앱 초기화 (async 지원)
 async function initApp() {
+    console.log('🚀 앱 초기화 시작');
+    
     initDarkMode();
     initOrganizations();
     initTabs();
     initEventListeners();
     initRoleBasedUI();
     
-    // 🚀 최적화: 캐시에서 먼저 로드 (즉시 표시)
+    // 🚀 최적화: 캐시에서 먼저 로드 (즉시 표시, 5초 타임아웃)
     if (typeof loadItemsFromCache === 'function') {
-        const cacheLoaded = await loadItemsFromCache();
-        if (cacheLoaded) {
-            console.log('✅ 캐시 데이터 표시 완료 - Firebase 동기화 시작');
-        } else {
-            console.log('ℹ️ 캐시 없음 - Firebase에서 전체 로드');
+        try {
+            const cacheResult = await loadItemsFromCache();
+            
+            if (cacheResult.success && cacheResult.data.length > 0) {
+                // 캐시 데이터를 items에 할당
+                items = cacheResult.data;
+                
+                // 즉시 화면에 표시
+                displayItems(items);
+                updateItemCount();
+                
+                console.log('✅ 캐시 데이터 표시 완료 - Firebase 동기화 시작');
+            } else {
+                console.log('ℹ️ 캐시 없음 - Firebase에서 전체 로드');
+            }
+        } catch (cacheError) {
+            console.warn('⚠️ 캐시 로드 중 오류 (무시하고 계속):', cacheError);
         }
     }
     
-    // Firebase 실시간 리스너 시작
+    // Firebase 실시간 리스너 시작 (항상 실행)
     loadItems();
     
     // 조사자 이름 자동완성 (사용자 이름으로)
     document.getElementById('surveyor').value = currentUser.displayName || '';
     // 갯수 기본값 설정
     document.getElementById('quantity').value = '1';
+    
+    console.log('✅ 앱 초기화 완료');
 }
 
 // 역할별 UI 초기화
