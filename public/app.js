@@ -16,6 +16,10 @@ let currentOrganization = '';
 let isListenerRegistered = false;
 let initialLoadComplete = false;
 
+// 🔒 폼 제출 방지 플래그
+let isSubmitting = false;
+let formEventListenersAttached = false;
+
 // 📊 읽기 횟수 추적 (디버깅용)
 let totalReads = 0;
 let sessionStart = Date.now();
@@ -496,11 +500,37 @@ function switchTab(tabName) {
 
 // 이벤트 리스너 초기화
 function initEventListeners() {
+    // 🔒 중복 등록 방지
+    if (formEventListenersAttached) {
+        console.log('⚠️ 이벤트 리스너가 이미 등록되어 있습니다.');
+        return;
+    }
+    
     // 연속 등록 모드
     initContinuousMode();
     
-    // 물품 추가 폼
-    itemForm.addEventListener('submit', handleAddItem);
+    // 물품 추가 폼 - 중복 방지 및 자동 제출 방지
+    itemForm.addEventListener('submit', handleAddItem, { once: false });
+    
+    // iOS Safari 호환성: Enter 키로 자동 제출 방지
+    const formInputs = itemForm.querySelectorAll('input, select, textarea');
+    formInputs.forEach(input => {
+        input.addEventListener('keydown', (e) => {
+            // Enter 키가 눌렸을 때
+            if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
+                // submit 버튼이 아닌 경우에만 preventDefault
+                if (e.target.type !== 'submit' && !isSubmitting) {
+                    e.preventDefault();
+                    // Enter 키로 다음 필드로 이동
+                    const inputs = Array.from(formInputs);
+                    const currentIndex = inputs.indexOf(e.target);
+                    if (currentIndex < inputs.length - 1) {
+                        inputs[currentIndex + 1].focus();
+                    }
+                }
+            }
+        });
+    });
     document.getElementById('resetBtn').addEventListener('click', () => {
         if (continuousMode) {
             resetFormKeepCommon();
@@ -512,8 +542,22 @@ function initEventListeners() {
         showToast('폼이 초기화되었습니다', 'success');
     });
     
-    // 물품 수정 폼
-    editForm.addEventListener('submit', handleEditItem);
+    // 물품 수정 폼 - 중복 방지
+    editForm.addEventListener('submit', handleEditItem, { once: false });
+    
+    // iOS Safari 호환성: 수정 폼 Enter 키 방지
+    const editInputs = editForm.querySelectorAll('input, select, textarea');
+    editInputs.forEach(input => {
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA' && !isSubmitting) {
+                if (e.target.type !== 'submit') {
+                    e.preventDefault();
+                }
+            }
+        });
+    });
+    
+    formEventListenersAttached = true;
     document.getElementById('closeModal').addEventListener('click', closeEditModal);
     document.getElementById('cancelEdit').addEventListener('click', closeEditModal);
     
@@ -581,7 +625,7 @@ async function loadTotalCount() {
 }
 
 // 일반 사용자용 이중 쿼리 로드 (userId + userEmail 병합)
-async function loadItemsForUser() {
+async function loadItemsForUser(retryCount = 0) {
     console.log('🔄 일반 사용자: 이중 쿼리 시작 (userId + userEmail)');
     
     const listLoading = document.getElementById('listLoading');
@@ -590,24 +634,49 @@ async function loadItemsForUser() {
         itemList.innerHTML = '';
     }
     
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 2000; // 2초
+    
     try {
         // 쿼리 1: userId로 조회 (본인이 작성한 데이터)
         console.log('📥 쿼리 1: userId로 조회 중...');
-        const query1 = db.collection('items')
-            .where('userId', '==', currentUser.uid)
-            .orderBy('timestamp', 'desc');
-        
-        const snapshot1 = await query1.get();
-        totalReads += snapshot1.docs.length;
+        let snapshot1;
+        try {
+            const query1 = db.collection('items')
+                .where('userId', '==', currentUser.uid)
+                .orderBy('timestamp', 'desc');
+            
+            snapshot1 = await query1.get();
+            totalReads += snapshot1.docs.length;
+        } catch (error) {
+            if (error.code === 'failed-precondition' && retryCount < MAX_RETRIES) {
+                console.log(`⚠️ 인덱스 생성 중... ${retryCount + 1}/${MAX_RETRIES} 재시도`);
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+                return loadItemsForUser(retryCount + 1);
+            }
+            throw error;
+        }
         
         // 쿼리 2: userEmail로 조회 (기존 데이터)
         console.log('📥 쿼리 2: userEmail로 조회 중...');
-        const query2 = db.collection('items')
-            .where('userEmail', '==', currentUser.email)
-            .orderBy('timestamp', 'desc');
-        
-        const snapshot2 = await query2.get();
-        totalReads += snapshot2.docs.length;
+        let snapshot2;
+        try {
+            const query2 = db.collection('items')
+                .where('userEmail', '==', currentUser.email)
+                .orderBy('timestamp', 'desc');
+            
+            snapshot2 = await query2.get();
+            totalReads += snapshot2.docs.length;
+        } catch (error) {
+            if (error.code === 'failed-precondition' && retryCount < MAX_RETRIES) {
+                console.log(`⚠️ 인덱스 생성 중... ${retryCount + 1}/${MAX_RETRIES} 재시도`);
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+                return loadItemsForUser(retryCount + 1);
+            }
+            // userEmail 쿼리 실패 시 userId 쿼리 결과만 사용
+            console.warn('⚠️ userEmail 쿼리 실패, userId 결과만 사용:', error);
+            snapshot2 = { docs: [], forEach: () => {} };
+        }
         
         // 중복 제거하면서 병합
         const itemsMap = new Map();
@@ -648,7 +717,22 @@ async function loadItemsForUser() {
     } catch (error) {
         console.error('❌ 이중 쿼리 오류:', error);
         if (listLoading) listLoading.style.display = 'none';
-        showToast('데이터를 불러오는데 실패했습니다', 'error');
+        
+        let errorMessage = '데이터를 불러오는데 실패했습니다';
+        if (error.code === 'failed-precondition') {
+            if (retryCount >= MAX_RETRIES) {
+                errorMessage = '인덱스 생성 중입니다. 잠시 후 페이지를 새로고침해주세요.';
+            } else {
+                // 재시도 중이면 메시지 표시 안 함
+                return;
+            }
+        } else if (error.code === 'permission-denied') {
+            errorMessage = '권한이 없습니다. 관리자에게 문의하세요.';
+        } else if (error.code === 'unavailable') {
+            errorMessage = '네트워크 연결을 확인해주세요.';
+        }
+        
+        showToast(errorMessage, 'error');
     }
 }
 
@@ -908,7 +992,10 @@ function setupAdminRealtimeListener(query) {
             } else if (error.code === 'unavailable') {
                 errorMessage = '네트워크 연결을 확인해주세요.';
             } else if (error.code === 'failed-precondition') {
-                errorMessage = '인덱스 생성 중입니다. 잠시 후 다시 시도해주세요.';
+                errorMessage = '인덱스 생성 중입니다. 잠시 후 페이지를 새로고침해주세요.';
+                // 인덱스 생성 링크 제공
+                console.error('인덱스 생성 필요:', error);
+                console.log('Firebase Console에서 인덱스를 생성하거나 잠시 후 다시 시도하세요.');
             } else if (error.message && error.message.includes('toDate')) {
                 errorMessage = '데이터 형식 오류 - 캐시를 삭제하고 다시 시도해주세요.';
                 // 자동으로 캐시 삭제
@@ -1251,6 +1338,32 @@ function resetFormKeepCommon() {
 // 물품 추가
 async function handleAddItem(e) {
     e.preventDefault();
+    e.stopPropagation(); // iOS Safari 호환성
+    
+    // 🔒 중복 제출 방지
+    if (isSubmitting) {
+        console.log('⚠️ 이미 제출 중입니다. 중복 제출 방지');
+        return false;
+    }
+    
+    // 필수 필드 검증
+    const itemName = document.getElementById('itemName').value.trim();
+    const surveyor = document.getElementById('surveyor').value.trim();
+    
+    if (!itemName || !surveyor) {
+        showToast('물품명과 조사자 이름은 필수 항목입니다', 'error');
+        return false;
+    }
+    
+    isSubmitting = true;
+    
+    // 제출 버튼 비활성화
+    const submitBtn = itemForm.querySelector('button[type="submit"]');
+    const originalBtnText = submitBtn ? submitBtn.textContent : '';
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = '저장 중...';
+    }
     
     const formData = new FormData(itemForm);
     const data = {};
@@ -1302,7 +1415,16 @@ async function handleAddItem(e) {
     } catch (error) {
         console.error('등록 오류:', error);
         showToast('등록 중 오류가 발생했습니다', 'error');
+    } finally {
+        // 🔒 제출 플래그 해제 및 버튼 복원
+        isSubmitting = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalBtnText;
+        }
     }
+    
+    return false; // iOS Safari 호환성
 }
 
 // 수정 모달 열기
@@ -1359,11 +1481,46 @@ function closeEditModal() {
     editModal.classList.remove('show');
     document.body.style.overflow = 'auto';
     currentEditId = null;
+    // 🔒 제출 플래그 초기화 (iOS Safari 호환성)
+    isSubmitting = false;
+    
+    // 버튼 상태 복원
+    const submitBtn = editForm.querySelector('button[type="submit"]');
+    if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = '✅ 수정 완료';
+    }
 }
 
 // 물품 수정
 async function handleEditItem(e) {
     e.preventDefault();
+    e.stopPropagation(); // iOS Safari 호환성
+    
+    // 🔒 중복 제출 방지
+    if (isSubmitting) {
+        console.log('⚠️ 이미 제출 중입니다. 중복 제출 방지');
+        return false;
+    }
+    
+    // 필수 필드 검증
+    const itemName = document.getElementById('editItemName').value.trim();
+    const surveyor = document.getElementById('editSurveyor').value.trim();
+    
+    if (!itemName || !surveyor) {
+        showToast('물품명과 조사자 이름은 필수 항목입니다', 'error');
+        return false;
+    }
+    
+    isSubmitting = true;
+    
+    // 제출 버튼 비활성화
+    const submitBtn = editForm.querySelector('button[type="submit"]');
+    const originalBtnText = submitBtn ? submitBtn.textContent : '';
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = '수정 중...';
+    }
     
     const formData = new FormData(editForm);
     const data = {};
@@ -1380,7 +1537,16 @@ async function handleEditItem(e) {
     } catch (error) {
         console.error('수정 오류:', error);
         showToast('수정 중 오류가 발생했습니다', 'error');
+    } finally {
+        // 🔒 제출 플래그 해제 및 버튼 복원
+        isSubmitting = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalBtnText;
+        }
     }
+    
+    return false; // iOS Safari 호환성
 }
 
 // 물품 삭제
