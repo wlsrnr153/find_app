@@ -217,3 +217,4 @@ Firebase Console → Firestore Database → Indexes → 복합 인덱스 추가
 - 캐시 시간 연장 고려
 
 
+
