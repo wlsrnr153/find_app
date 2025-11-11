@@ -194,11 +194,14 @@ async function initApp() {
                 // 캐시 데이터를 items에 할당
                 items = cacheResult.data;
                 
+                // 🔥 중요: 캐시에서 로드했으므로 초기 로드 완료로 표시
+                initialLoadComplete = true;
+                
                 // 즉시 화면에 표시
                 displayItems(items);
                 updateItemCount();
                 
-                console.log('✅ 캐시 데이터 표시 완료 - Firebase 동기화 시작');
+                console.log('✅ 캐시 데이터 표시 완료 - Firebase 동기화 시작 (변경사항만 감지)');
             } else {
                 console.log('ℹ️ 캐시 없음 - Firebase에서 전체 로드');
             }
@@ -618,16 +621,28 @@ function loadItems() {
             
             if (isInitialLoad) {
                 // 초기 로드: 모든 문서 (앱 실행 후 최초 1회만)
-                items = [];
+                // 🔥 주의: 캐시 데이터가 있을 수 있으므로 기존 items 유지하고 병합
+                const existingIds = new Set(items.map(item => item.id));
+                let newItemsCount = 0;
+                
                 snapshot.forEach((doc) => {
-                    items.push({
-                        id: doc.id,
-                        ...doc.data()
-                    });
+                    if (!existingIds.has(doc.id)) {
+                        items.push({
+                            id: doc.id,
+                            ...doc.data()
+                        });
+                        newItemsCount++;
+                    }
                 });
+                
                 initialLoadComplete = true; // 🔥 플래그 설정 - 다시는 전체 읽기 안 함!
-                totalReads += items.length;
-                console.log(`📥 초기 로드 완료: ${items.length}개 문서 읽기 (이후로는 변경사항만 읽기)`);
+                totalReads += snapshot.docs.length;
+                
+                if (newItemsCount > 0) {
+                    console.log(`📥 초기 로드 완료: ${newItemsCount}개 새 문서 추가 (캐시: ${items.length - newItemsCount}개, 전체: ${items.length}개)`);
+                } else {
+                    console.log(`📥 초기 로드 완료: 새 문서 없음 (캐시: ${items.length}개 유지)`);
+                }
                 console.log(`📊 총 읽기 횟수: ${totalReads}회 (세션 시작 후 ${Math.floor((Date.now() - sessionStart) / 1000)}초)`);
                 
                 // 관리자 페이지네이션: 마지막 문서 저장
@@ -649,9 +664,10 @@ function loadItems() {
                         if (existingIndex === -1) {
                             items.unshift(docData);
                             addedCount++;
-                            console.log(`➕ 새 물품 추가: "${docData.itemName}" (userId: ${docData.userId})`);
+                            console.log(`➕ 새 물품 추가: "${docData.itemName}" (ID: ${docData.id}, userId: ${docData.userId})`);
+                            console.log(`   현재 items 배열 크기: ${items.length}개`);
                         } else {
-                            console.log(`⚠️ 이미 존재하는 물품: "${docData.itemName}"`);
+                            console.log(`⚠️ 이미 존재하는 물품: "${docData.itemName}" (중복 방지)`);
                         }
                     } else if (change.type === 'modified') {
                         // 문서 수정
@@ -677,6 +693,7 @@ function loadItems() {
                     totalReads += changeReads;
                     console.log(`🔄 변경사항 총계: ➕${addedCount} ✏️${modifiedCount} 🗑️${removedCount} (읽기 ${changeReads}회)`);
                     console.log(`📊 총 읽기 횟수: ${totalReads}회 (세션 시작 후 ${Math.floor((Date.now() - sessionStart) / 1000)}초)`);
+                    console.log(`📦 현재 items 배열: ${items.length}개 항목`);
                     
                     // 데이터 변경 시 전체 개수 업데이트 (추가/삭제만)
                     if (addedCount > 0 || removedCount > 0) {
@@ -694,13 +711,17 @@ function loadItems() {
             if (listLoading) listLoading.style.display = 'none';
             
             // 🔥 검색 상태 유지: 검색어가 있으면 필터링 적용
+            console.log(`🖼️ 화면 업데이트 시작... (items: ${items.length}개)`);
             if (searchInput && (searchInput.value || filterCategory.value)) {
+                console.log(`🔍 검색 필터 적용 중...`);
                 filterItems(); // 검색 필터 유지
             } else {
+                console.log(`📋 전체 목록 표시 중...`);
                 displayItems(items);
             }
             updateItemCount();
             updateDashboard();
+            console.log(`✅ 화면 업데이트 완료!`);
         }, (error) => {
             console.error('❌ 데이터 로드 오류:', error);
             console.error('오류 상세:', {
@@ -1079,12 +1100,16 @@ async function handleAddItem(e) {
         물품명: data.itemName,
         userId: data.userId,
         userEmail: data.userEmail,
-        현재사용자: currentUser.uid
+        현재사용자: currentUser.uid,
+        현재역할: currentUserRole
     });
     
     try {
         const docRef = await db.collection('items').add(data);
         console.log('✅ 물품 등록 완료! 문서ID:', docRef.id);
+        console.log('⏳ 실시간 리스너가 곧 이 변경사항을 감지합니다...');
+        console.log('   리스너 등록 상태:', isListenerRegistered ? '✅ 등록됨' : '❌ 미등록');
+        console.log('   초기 로드 완료:', initialLoadComplete ? '✅ 완료' : '❌ 미완료');
         
         // 🎉 물품 등록 알림 (더 명확하게)
         showToast(`✅ "${data.itemName || '물품'}" 등록 완료!`, 'success');
