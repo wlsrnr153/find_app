@@ -164,13 +164,25 @@ logoutBtn.addEventListener('click', async () => {
     }
 });
 
-// 앱 초기화
-function initApp() {
+// 앱 초기화 (async 지원)
+async function initApp() {
     initDarkMode();
     initOrganizations();
     initTabs();
     initEventListeners();
     initRoleBasedUI();
+    
+    // 🚀 최적화: 캐시에서 먼저 로드 (즉시 표시)
+    if (typeof loadItemsFromCache === 'function') {
+        const cacheLoaded = await loadItemsFromCache();
+        if (cacheLoaded) {
+            console.log('✅ 캐시 데이터 표시 완료 - Firebase 동기화 시작');
+        } else {
+            console.log('ℹ️ 캐시 없음 - Firebase에서 전체 로드');
+        }
+    }
+    
+    // Firebase 실시간 리스너 시작
     loadItems();
     
     // 조사자 이름 자동완성 (사용자 이름으로)
@@ -644,6 +656,11 @@ function loadItems() {
                         loadTotalCount();
                     }
                 }
+            }
+            
+            // 🚀 캐시 저장 (디바운스)
+            if (typeof debouncedSaveCache === 'function') {
+                debouncedSaveCache(items);
             }
             
             // 로딩 숨기기

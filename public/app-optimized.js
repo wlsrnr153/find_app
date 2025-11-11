@@ -40,118 +40,8 @@ db.enablePersistence({ synchronizeTabs: true })
         }
     });
 
-// DOM 요소
-const itemForm = document.getElementById('itemForm');
-const editForm = document.getElementById('editForm');
-const itemList = document.getElementById('itemList');
-const searchInput = document.getElementById('searchInput');
-const filterCategory = document.getElementById('filterCategory');
-const sortBy = document.getElementById('sortBy');
-const itemCount = document.getElementById('itemCount');
-const toast = document.getElementById('toast');
-const editModal = document.getElementById('editModal');
-const userName = document.getElementById('userName');
-const logoutBtn = document.getElementById('logoutBtn');
-const darkModeToggle = document.getElementById('darkModeToggle');
-
-// 인증 상태 확인
-auth.onAuthStateChanged(async (user) => {
-    if (user) {
-        currentUser = user;
-        await initUserRole();
-        
-        const roleEmoji = currentUserRole === 'admin' ? '👑' : '👤';
-        const roleText = currentUserRole === 'admin' ? ' (관리자)' : '';
-        userName.textContent = `${roleEmoji} ${user.displayName || user.email}${roleText}`;
-        
-        initApp();
-    } else {
-        window.location.href = 'login.html';
-    }
-});
-
-// 사용자 역할 초기화
-async function initUserRole() {
-    try {
-        const userDoc = await db.collection('users').doc(currentUser.uid).get();
-        
-        if (userDoc.exists) {
-            currentUserRole = userDoc.data().role || 'user';
-        } else {
-            const usersSnapshot = await db.collection('users').limit(1).get();
-            const isFirstUser = usersSnapshot.empty;
-            currentUserRole = isFirstUser ? 'admin' : 'user';
-            
-            await db.collection('users').doc(currentUser.uid).set({
-                email: currentUser.email,
-                displayName: currentUser.displayName || currentUser.email,
-                role: currentUserRole,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-            
-            if (isFirstUser) {
-                showToast('첫 번째 사용자로 관리자 권한이 부여되었습니다', 'success');
-            }
-        }
-    } catch (error) {
-        console.error('사용자 역할 초기화 오류:', error);
-        currentUserRole = 'user';
-    }
-}
-
-// 로그아웃
-logoutBtn.addEventListener('click', async () => {
-    if (confirm('로그아웃 하시겠습니까?')) {
-        try {
-            await auth.signOut();
-            window.location.href = 'login.html';
-        } catch (error) {
-            console.error('로그아웃 오류:', error);
-            showToast('로그아웃에 실패했습니다', 'error');
-        }
-    }
-});
-
-// 앱 초기화 (async 지원)
-async function initApp() {
-    initDarkMode();
-    initOrganizations();
-    initTabs();
-    initEventListeners();
-    initRoleBasedUI();
-    
-    // 🚀 최적화: 캐시에서 먼저 로드 (즉시 표시)
-    const cacheLoaded = await loadItemsFromCache();
-    
-    if (cacheLoaded) {
-        console.log('✅ 캐시 데이터 표시 완료 - Firebase 동기화 시작');
-    } else {
-        console.log('ℹ️ 캐시 없음 - Firebase에서 전체 로드');
-    }
-    
-    // 그 다음 실시간 리스너 시작 (항상 실행)
-    loadItemsOptimized();
-    
-    // 조사자 이름 자동 설정
-    const surveyorInput = document.getElementById('surveyor');
-    if (surveyorInput && currentUser) {
-        surveyorInput.value = currentUser.displayName || '';
-    }
-}
-
-// 역할별 UI 초기화
-function initRoleBasedUI() {
-    const userManagementSection = document.getElementById('userManagementSection');
-    const dangerZoneSection = document.getElementById('dangerZoneSection');
-    
-    if (currentUserRole === 'admin') {
-        if (userManagementSection) userManagementSection.style.display = 'block';
-        if (dangerZoneSection) dangerZoneSection.style.display = 'block';
-    } else {
-        if (userManagementSection) userManagementSection.style.display = 'none';
-        if (dangerZoneSection) dangerZoneSection.style.display = 'none';
-    }
-}
+// ⚠️ 주의: app-optimized.js는 순수하게 캐시 관련 함수만 제공합니다
+// DOM 선택, 인증, 초기화 등은 모두 app.js에서 처리됩니다
 
 // ============================================
 // 🚀 최적화된 데이터 로드 함수
@@ -356,138 +246,8 @@ function debouncedSaveCache(itemsData) {
     }, CACHE_UPDATE_DEBOUNCE);
 }
 
-// 최적화된 데이터 로드 (변경된 문서만 처리) - 버그 수정 버전
-function loadItemsOptimized() {
-    if (unsubscribe) {
-        unsubscribe();
-    }
-    
-    const listLoading = document.getElementById('listLoading');
-    if (listLoading) {
-        listLoading.style.display = 'block';
-    }
-    
-    // 🔥 핵심 최적화: docChanges()로 변경된 문서만 처리
-    unsubscribe = db.collection('items')
-        .orderBy('timestamp', 'desc')
-        .onSnapshot((snapshot) => {
-            // 🐛 버그 수정: 플래그 기반 초기 로드 판단 (items.length가 아님!)
-            if (!initialLoadComplete) {
-                // ✅ 초기 로드: 모든 문서 (캐시 여부와 무관하게 한 번만 실행)
-                items = [];
-                snapshot.forEach((doc) => {
-                    items.push({
-                        id: doc.id,
-                        ...doc.data()
-                    });
-                });
-                
-                initialLoadComplete = true; // 플래그 설정
-                console.log(`📥 초기 로드 완료: ${items.length}개 문서 (Firebase 읽기 ${items.length}회)`);
-                console.log('✅ 이후로는 변경사항만 읽기 (최적화 모드 활성화)');
-            } else {
-                // 🚀 변경사항만 처리 (읽기 최소화!)
-                let addedCount = 0, modifiedCount = 0, removedCount = 0;
-                
-                snapshot.docChanges().forEach((change) => {
-                    const docData = { id: change.doc.id, ...change.doc.data() };
-                    
-                    if (change.type === 'added') {
-                        // 중복 확인 후 추가
-                        const existingIndex = items.findIndex(item => item.id === docData.id);
-                        if (existingIndex === -1) {
-                            items.unshift(docData);
-                            addedCount++;
-                        }
-                    } else if (change.type === 'modified') {
-                        const index = items.findIndex(item => item.id === docData.id);
-                        if (index !== -1) {
-                            items[index] = docData;
-                            modifiedCount++;
-                        }
-                    } else if (change.type === 'removed') {
-                        const beforeLength = items.length;
-                        items = items.filter(item => item.id !== docData.id);
-                        if (items.length < beforeLength) {
-                            removedCount++;
-                        }
-                    }
-                });
-                
-                const totalChanges = addedCount + modifiedCount + removedCount;
-                if (totalChanges > 0) {
-                    console.log(`🔄 변경 감지: ➕${addedCount} ✏️${modifiedCount} 🗑️${removedCount} (Firebase 읽기 ${totalChanges}회)`);
-                }
-            }
-            
-            // 🚀 디바운스된 캐시 저장 (불필요한 저장 방지)
-            debouncedSaveCache(items);
-            
-            if (listLoading) listLoading.style.display = 'none';
-            
-            // 함수가 정의된 경우에만 호출 (app.js 로드 후)
-            if (typeof displayItems === 'function') {
-                displayItems(items);
-            }
-            if (typeof updateItemCount === 'function') {
-                updateItemCount();
-            }
-            if (typeof updateDashboard === 'function') {
-                updateDashboard();
-            }
-        }, (error) => {
-            console.error('❌ 데이터 로드 오류:', error);
-            if (listLoading) listLoading.style.display = 'none';
-            if (typeof showToast === 'function') {
-                showToast('데이터를 불러오는데 실패했습니다', 'error');
-            }
-        });
-}
-
-// 수동 새로고침 함수 (필요시에만 사용)
-async function manualRefresh() {
-    const listLoading = document.getElementById('listLoading');
-    if (listLoading) listLoading.style.display = 'block';
-    
-    try {
-        const snapshot = await db.collection('items')
-            .orderBy('timestamp', 'desc')
-            .get({ source: 'server' }); // 강제로 서버에서 가져오기
-        
-        items = [];
-        snapshot.forEach((doc) => {
-            items.push({
-                id: doc.id,
-                ...doc.data()
-            });
-        });
-        
-        // 디바운스된 캐시 저장
-        debouncedSaveCache(items);
-        
-        // 함수가 정의된 경우에만 호출 (app.js 로드 후)
-        if (typeof displayItems === 'function') {
-            displayItems(items);
-        }
-        if (typeof updateItemCount === 'function') {
-            updateItemCount();
-        }
-        if (typeof updateDashboard === 'function') {
-            updateDashboard();
-        }
-        if (typeof showToast === 'function') {
-            showToast('데이터를 새로고침했습니다', 'success');
-        }
-        console.log(`🔄 수동 새로고침: ${items.length}개 문서 (Firebase 읽기 ${items.length}회)`);
-    } catch (error) {
-        console.error('❌ 새로고침 오류:', error);
-        if (typeof showToast === 'function') {
-            showToast('새로고침에 실패했습니다', 'error');
-        }
-    } finally {
-        if (listLoading) listLoading.style.display = 'none';
-    }
-}
+// ⚠️ loadItemsOptimized()와 manualRefresh()는 app.js의 loadItems()로 통합되었습니다
+// app-optimized.js는 순수하게 캐시 관련 함수만 제공합니다
 
 // 캐시 완전 삭제 함수 (디버깅/문제 해결용)
 async function clearAllCache() {
@@ -518,20 +278,18 @@ async function clearAllCache() {
 }
 
 // ============================================
-// 🔧 app.js에서 필요한 함수들
+// ✅ app-optimized.js 역할
 // ============================================
-// 아래 함수들은 app.js에서 가져와야 합니다:
-// - initDarkMode()
-// - initOrganizations()
-// - initTabs()
-// - initEventListeners()
-// - displayItems(items)
-// - updateItemCount()
-// - updateDashboard()
-// - showToast(message, type)
+// 이 파일은 순수하게 IndexedDB 캐싱 시스템만 제공합니다.
+// 
+// 제공하는 함수:
+// - initIndexedDB(): IndexedDB 초기화
+// - loadItemsFromCache(): 캐시에서 데이터 로드
+// - saveItemsToCache(): 캐시에 데이터 저장
+// - debouncedSaveCache(): 디바운스된 캐시 저장
+// - clearAllCache(): 모든 캐시 삭제
 //
-// app-optimized.js는 캐시 로직만 담당하고,
-// 실제 UI 함수들은 app.js에서 실행됩니다.
+// app.js에서 다음과 같이 사용:
+// 1. initApp()에서 loadItemsFromCache() 호출
+// 2. loadItems()에서 debouncedSaveCache() 호출
 // ============================================
-
-
