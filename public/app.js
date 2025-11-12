@@ -66,14 +66,17 @@ auth.onAuthStateChanged(async (user) => {
             // 사용자 역할 확인 및 초기화
             await initUserRole();
             
-            const roleEmoji = currentUserRole === 'admin' ? '👑' : '👤';
-            const roleText = currentUserRole === 'admin' ? ' (관리자)' : '';
-            userName.textContent = `${roleEmoji} ${user.displayName || user.email}${roleText}`;
+            // 역할 표시 업데이트
+            updateUserRoleDisplay(user);
             
             // 🔥 initApp()을 await로 호출하여 완료될 때까지 대기
             await initApp();
             
+            // 역할 기반 UI 다시 확인 (역할이 변경되었을 수 있음)
+            initRoleBasedUI();
+            
             console.log('✅ 앱 로딩 완전히 완료');
+            console.log(`📊 최종 확인 - 사용자 역할: ${currentUserRole}`);
         } catch (error) {
             console.error('❌ 앱 초기화 중 오류:', error);
             showToast('앱 초기화에 실패했습니다. 페이지를 새로고침해주세요.', 'error');
@@ -88,8 +91,17 @@ auth.onAuthStateChanged(async (user) => {
 // 사용자 역할 초기화 (Custom Claims 사용 - 읽기 최적화)
 async function initUserRole() {
     try {
+        console.log('🔄 사용자 역할 초기화 시작...');
+        
         // 🔥 1순위: Custom Claims에서 역할 확인 (읽기 0회!)
-        const idTokenResult = await currentUser.getIdTokenResult();
+        // 강제로 새 토큰 가져오기 (캐시 무시)
+        const idTokenResult = await currentUser.getIdTokenResult(true);
+        
+        console.log('📋 Custom Claims 확인:', {
+            claims: idTokenResult.claims,
+            hasRole: !!idTokenResult.claims.role,
+            role: idTokenResult.claims.role
+        });
         
         if (idTokenResult.claims.role) {
             // Custom Claims에 role이 있으면 바로 사용
@@ -107,22 +119,35 @@ async function initUserRole() {
         
         if (userDoc.exists) {
             // 기존 사용자 - Firestore에는 있지만 Custom Claims가 없음
-            currentUserRole = userDoc.data().role || 'user';
-            console.log(`📝 기존 사용자 역할: ${currentUserRole}`);
+            const firestoreRole = userDoc.data().role || 'user';
+            currentUserRole = firestoreRole;
+            console.log(`📝 기존 사용자 역할 (Firestore): ${currentUserRole}`);
             
             // 🔧 Custom Claims 마이그레이션 시도
             console.log('🔄 Custom Claims 설정 시도 (마이그레이션)...');
             try {
                 const setRole = firebase.functions().httpsCallable('setUserRole');
-                await setRole({ userId: currentUser.uid, role: currentUserRole });
+                const result = await setRole({ userId: currentUser.uid, role: currentUserRole });
+                
+                console.log('✅ Custom Claims 설정 결과:', result.data);
                 
                 // 토큰 강제 갱신하여 Custom Claims 즉시 적용
                 await currentUser.getIdToken(true);
                 
-                console.log('✅ Custom Claims 마이그레이션 완료');
+                // 다시 확인
+                const newTokenResult = await currentUser.getIdTokenResult(true);
+                if (newTokenResult.claims.role) {
+                    currentUserRole = newTokenResult.claims.role;
+                    console.log('✅ Custom Claims 마이그레이션 완료, 새 역할:', currentUserRole);
+                } else {
+                    console.warn('⚠️ Custom Claims가 아직 적용되지 않았습니다. 다음 로그인 시 적용됩니다.');
+                }
+                
                 showToast('사용자 정보가 업데이트되었습니다', 'success');
             } catch (functionError) {
-                console.warn('⚠️ Custom Claims 설정 실패 (Functions 미배포 또는 권한 없음):', functionError);
+                console.warn('⚠️ Custom Claims 설정 실패:', functionError);
+                console.warn('   오류 코드:', functionError.code);
+                console.warn('   오류 메시지:', functionError.message);
                 // 실패해도 계속 진행 (Firestore 역할 사용)
             }
         } else {
@@ -137,6 +162,8 @@ async function initUserRole() {
             
             currentUserRole = isFirstUser ? 'admin' : 'user';
             
+            console.log(`👤 첫 번째 사용자: ${isFirstUser}, 역할: ${currentUserRole}`);
+            
             // Firestore에 저장 (Cloud Function의 onUserCreate와 중복될 수 있으나 안전장치)
             await db.collection('users').doc(currentUser.uid).set({
                 email: currentUser.email,
@@ -147,16 +174,31 @@ async function initUserRole() {
             
             console.log(`✅ 신규 사용자 등록: ${currentUserRole}`);
             
+            // Custom Claims도 즉시 설정 시도
+            try {
+                const setRole = firebase.functions().httpsCallable('setUserRole');
+                await setRole({ userId: currentUser.uid, role: currentUserRole });
+                await currentUser.getIdToken(true);
+                console.log('✅ 신규 사용자 Custom Claims 설정 완료');
+            } catch (error) {
+                console.warn('⚠️ 신규 사용자 Custom Claims 설정 실패:', error);
+            }
+            
             if (isFirstUser) {
                 showToast('첫 번째 사용자로 관리자 권한이 부여되었습니다', 'success');
             }
-            
-            // 다음 로그인 때 Custom Claims가 적용되도록 안내
-            console.log('ℹ️ 다음 로그인 시 Custom Claims가 자동으로 적용됩니다');
         }
+        
+        console.log(`🎯 최종 사용자 역할: ${currentUserRole}`);
     } catch (error) {
-        console.error('사용자 역할 초기화 오류:', error);
+        console.error('❌ 사용자 역할 초기화 오류:', error);
+        console.error('   오류 상세:', {
+            code: error.code,
+            message: error.message,
+            stack: error.stack
+        });
         currentUserRole = 'user'; // 기본값
+        showToast('사용자 역할 확인 중 오류가 발생했습니다', 'error');
     }
 }
 
@@ -226,14 +268,25 @@ async function initApp() {
     console.log('✅ 앱 초기화 완료');
 }
 
+// 사용자 역할 표시 업데이트
+function updateUserRoleDisplay(user) {
+    const roleEmoji = currentUserRole === 'admin' ? '👑' : '👤';
+    const roleText = currentUserRole === 'admin' ? ' (관리자)' : '';
+    userName.textContent = `${roleEmoji} ${user.displayName || user.email}${roleText}`;
+    console.log(`👤 사용자 역할 표시 업데이트: ${currentUserRole}`);
+}
+
 // 역할별 UI 초기화
 function initRoleBasedUI() {
+    console.log(`🔄 역할별 UI 초기화 시작 (현재 역할: ${currentUserRole})`);
+    
     const userManagementSection = document.getElementById('userManagementSection');
     const migrationSection = document.getElementById('migrationSection');
     const dangerZoneSection = document.getElementById('dangerZoneSection');
     
     if (currentUserRole === 'admin') {
         // 관리자는 사용자 관리 섹션, 마이그레이션 섹션, 위험 영역 표시
+        console.log('👑 관리자 UI 표시');
         if (userManagementSection) {
             userManagementSection.style.display = 'block';
         }
@@ -245,6 +298,7 @@ function initRoleBasedUI() {
         }
     } else {
         // 일반 사용자는 사용자 관리 섹션, 마이그레이션 섹션, 위험 영역 숨김
+        console.log('👤 일반 사용자 UI 표시');
         if (userManagementSection) {
             userManagementSection.style.display = 'none';
         }
@@ -255,6 +309,8 @@ function initRoleBasedUI() {
             dangerZoneSection.style.display = 'none';
         }
     }
+    
+    console.log('✅ 역할별 UI 초기화 완료');
 }
 
 // 기관 관리 초기화
