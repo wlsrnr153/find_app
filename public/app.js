@@ -664,9 +664,28 @@ async function loadTotalCount() {
             countQuery = countQuery.where('userId', '==', currentUser.uid);
         }
         
-        // count() 사용: 실제 문서를 읽지 않고 개수만 가져옴 (읽기 1회만 발생)
-        const snapshot = await countQuery.count().get();
-        totalItemCount = snapshot.data().count;
+        // Firebase compat 모드에서 count 쿼리 사용
+        // count().get() 방식이 작동하지 않을 수 있으므로 폴백 방식 준비
+        let snapshot;
+        try {
+            // 먼저 count().get() 방식 시도
+            snapshot = await countQuery.count().get();
+            // snapshot.data()가 존재하는지 확인
+            if (snapshot && snapshot.data && snapshot.data().count !== undefined) {
+                totalItemCount = snapshot.data().count;
+            } else {
+                throw new Error('count() 결과가 올바르지 않습니다');
+            }
+        } catch (countError) {
+            // count().get()이 실패하면 실제 문서를 읽지 않고 현재 로드된 데이터 사용
+            // 실제 문서를 읽으면 읽기 횟수가 문서 개수만큼 발생하므로 비효율적
+            console.log('⚠️ count().get() 실패, 현재 로드된 데이터 개수 사용:', countError.message);
+            // 현재 로드된 items 길이를 사용 (읽기 0회)
+            // 실제 전체 개수는 나중에 데이터 로드 시 업데이트될 수 있음
+            totalItemCount = items.length;
+            updateItemCount();
+            return;
+        }
         
         console.log(`📊 전체 데이터 개수: ${totalItemCount}개 (count 쿼리 - 읽기 1회)`);
         totalReads += 1; // count 쿼리는 읽기 1회로 계산됨
@@ -674,7 +693,7 @@ async function loadTotalCount() {
         updateItemCount();
     } catch (error) {
         console.error('전체 개수 로드 오류:', error);
-        // count() API를 지원하지 않는 경우 폴백
+        // 모든 방법이 실패한 경우 현재 로드된 items 길이 사용
         totalItemCount = items.length;
         updateItemCount();
     }
