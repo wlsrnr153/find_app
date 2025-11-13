@@ -1120,6 +1120,7 @@ body {
     gap: 10px;
     cursor: pointer;
     user-select: none;
+    position: relative; /* ::after의 절대 위치 기준점 */
 }
 
 .toggle-label::before {
@@ -1130,6 +1131,8 @@ body {
     border-radius: 12px;
     position: relative;
     transition: background 0.3s;
+    flex-shrink: 0; /* 토글 스위치 크기 고정 */
+    order: -1; /* ::before를 텍스트 앞에 배치 */
 }
 
 .toggle-label::after {
@@ -1139,9 +1142,12 @@ body {
     background: white;
     border-radius: 50%;
     position: absolute;
-    left: 2px;
-    transition: transform 0.3s;
+    left: 2px; /* ::before의 시작 위치 기준 (::before가 order: -1로 먼저 렌더링됨) */
+    top: 50%;
+    transform: translateY(-50%);
+    transition: left 0.3s, transform 0.3s;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    pointer-events: none; /* 클릭 이벤트 방해 방지 */
 }
 
 .toggle-checkbox:checked + .toggle-label::before {
@@ -1149,7 +1155,8 @@ body {
 }
 
 .toggle-checkbox:checked + .toggle-label::after {
-    transform: translateX(24px);
+    left: 26px; /* 48px(전체 너비) - 20px(원형 버튼 너비) - 2px(오른쪽 여백) */
+    transform: translateY(-50%); /* 수직 중앙 정렬 유지 */
 }
 
 .toggle-text {
