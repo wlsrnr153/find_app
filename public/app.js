@@ -627,6 +627,7 @@ function initEventListeners() {
     
     // 데이터 관리
     document.getElementById('exportExcel').addEventListener('click', exportExcel);
+    document.getElementById('exportExcelAll').addEventListener('click', exportExcelAll);
     document.getElementById('exportJson').addEventListener('click', exportJson);
     document.getElementById('importBtn').addEventListener('click', () => {
         document.getElementById('importFile').click();
@@ -1740,7 +1741,7 @@ function sortItems(itemsToSort, sortType) {
     return sorted;
 }
 
-// 엑셀 다운로드 (클라이언트 사이드)
+// 엑셀 다운로드 - 현재 페이지 (클라이언트 사이드)
 function exportExcel() {
     if (items.length === 0) {
         showToast('다운로드할 데이터가 없습니다', 'error');
@@ -1784,11 +1785,200 @@ function exportExcel() {
             { wch: 18 }, { wch: 20 }
         ];
         
-        XLSX.writeFile(workbook, `물품조사_${new Date().toISOString().split('T')[0]}.xlsx`);
+        XLSX.writeFile(workbook, `물품조사_현재페이지_${new Date().toISOString().split('T')[0]}.xlsx`);
         showToast('엑셀 파일이 다운로드되었습니다', 'success');
     } catch (error) {
         console.error('다운로드 오류:', error);
         showToast('다운로드 중 오류가 발생했습니다', 'error');
+    }
+}
+
+// 엑셀 다운로드 - 전체 데이터 (배치 처리)
+async function exportExcelAll() {
+    // 관리자 권한 확인
+    if (currentUserRole !== 'admin') {
+        showToast('관리자만 전체 데이터를 다운로드할 수 있습니다', 'error');
+        return;
+    }
+    
+    // 데이터 개수 확인 및 경고
+    const estimatedCount = totalItemCount > 0 ? totalItemCount : items.length;
+    if (estimatedCount === 0) {
+        showToast('다운로드할 데이터가 없습니다', 'error');
+        return;
+    }
+    
+    // 대용량 데이터 경고
+    if (estimatedCount > 10000) {
+        const confirmed = confirm(
+            `⚠️ 주의: 전체 데이터가 ${estimatedCount.toLocaleString()}건 이상입니다.\n\n` +
+            `다운로드에 시간이 오래 걸리고 Firebase 읽기 비용이 발생합니다.\n\n` +
+            `계속하시겠습니까?`
+        );
+        if (!confirmed) return;
+    } else if (estimatedCount > 1000) {
+        const confirmed = confirm(
+            `전체 데이터 ${estimatedCount.toLocaleString()}건을 다운로드합니다.\n\n` +
+            `시간이 걸릴 수 있습니다. 계속하시겠습니까?`
+        );
+        if (!confirmed) return;
+    }
+    
+    // 프로그레스 모달 표시
+    const progressModal = document.getElementById('progressModal');
+    const progressBar = document.getElementById('progressBar');
+    const progressPercent = document.getElementById('progressPercent');
+    const progressMessage = document.getElementById('progressMessage');
+    
+    progressModal.style.display = 'flex';
+    progressBar.style.width = '0%';
+    progressPercent.textContent = '0%';
+    progressMessage.textContent = '데이터를 가져오는 중...';
+    
+    try {
+        const BATCH_SIZE = 500; // 500건씩 로드
+        let allItems = [];
+        let lastDoc = null;
+        let loadedCount = 0;
+        let batchCount = 0;
+        
+        console.log('🔄 전체 데이터 다운로드 시작...');
+        
+        // 배치 단위로 데이터 로드
+        do {
+            batchCount++;
+            let query = db.collection('items')
+                .orderBy('timestamp', 'desc')
+                .limit(BATCH_SIZE);
+            
+            if (lastDoc) {
+                query = query.startAfter(lastDoc);
+            }
+            
+            const snapshot = await query.get();
+            
+            if (snapshot.empty) break;
+            
+            // 문서 데이터 추출
+            const batchItems = snapshot.docs.map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    surveyor: data.surveyor,
+                    organization: data.organization,
+                    location: data.location,
+                    itemName: data.itemName,
+                    assetNumber: data.assetNumber,
+                    quantity: data.quantity,
+                    category: data.category,
+                    manufacturer: data.manufacturer,
+                    model: data.model,
+                    width: data.width,
+                    height: data.height,
+                    depth: data.depth,
+                    color: data.color,
+                    material: data.material,
+                    condition: data.condition,
+                    notes: data.notes,
+                    timestamp: data.timestamp,
+                    userEmail: data.userEmail,
+                    userId: data.userId
+                };
+            });
+            
+            allItems = allItems.concat(batchItems);
+            loadedCount += batchItems.length;
+            
+            // 프로그레스 업데이트
+            const progress = estimatedCount > 0 
+                ? Math.min(100, Math.floor((loadedCount / estimatedCount) * 100))
+                : Math.floor((batchCount * BATCH_SIZE / 1000) * 50); // 예상치 없으면 임시 진행률
+            
+            progressBar.style.width = `${progress}%`;
+            progressPercent.textContent = `${progress}%`;
+            progressMessage.textContent = `데이터 로드 중... (${loadedCount.toLocaleString()}건)`;
+            
+            console.log(`📦 배치 ${batchCount}: ${batchItems.length}건 로드 (누적: ${loadedCount}건)`);
+            
+            // 다음 페이지를 위한 마지막 문서 저장
+            lastDoc = snapshot.docs[snapshot.docs.length - 1];
+            
+            // 더 이상 데이터가 없으면 중단
+            if (snapshot.docs.length < BATCH_SIZE) break;
+            
+        } while (lastDoc);
+        
+        console.log(`✅ 전체 데이터 로드 완료: ${allItems.length}건`);
+        
+        // 프로그레스 메시지 업데이트
+        progressMessage.textContent = '엑셀 파일 생성 중...';
+        progressBar.style.width = '90%';
+        progressPercent.textContent = '90%';
+        
+        // 엑셀 데이터 생성
+        const worksheetData = allItems.map(item => {
+            const timestamp = item.timestamp ? item.timestamp.toDate() : new Date();
+            return {
+                '조사자': item.surveyor || '',
+                '기관명': item.organization || '',
+                '사용위치': item.location || '',
+                '물품명': item.itemName || '',
+                '자산번호': item.assetNumber || '',
+                '갯수': item.quantity || '',
+                '카테고리': item.category || '',
+                '제조사': item.manufacturer || '',
+                '모델명': item.model || '',
+                '가로(cm)': item.width || '',
+                '세로(cm)': item.height || '',
+                '깊이(cm)': item.depth || '',
+                '색상': item.color || '',
+                '재질': item.material || '',
+                '상태': item.condition || '',
+                '비고': item.notes || '',
+                '조사일시': timestamp.toLocaleString('ko-KR'),
+                '작성자': item.userEmail || ''
+            };
+        });
+        
+        const worksheet = XLSX.utils.json_to_sheet(worksheetData);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, '물품조사');
+        
+        // 컬럼 너비 설정
+        worksheet['!cols'] = [
+            { wch: 10 }, { wch: 15 }, { wch: 12 }, { wch: 15 },
+            { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+            { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+            { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 20 }, 
+            { wch: 18 }, { wch: 20 }
+        ];
+        
+        // 파일 다운로드
+        progressBar.style.width = '100%';
+        progressPercent.textContent = '100%';
+        progressMessage.textContent = '다운로드 중...';
+        
+        XLSX.writeFile(workbook, `물품조사_전체_${allItems.length}건_${new Date().toISOString().split('T')[0]}.xlsx`);
+        
+        // 프로그레스 모달 닫기
+        setTimeout(() => {
+            progressModal.style.display = 'none';
+        }, 500);
+        
+        showToast(`전체 데이터 ${allItems.length.toLocaleString()}건이 다운로드되었습니다`, 'success');
+        console.log('✅ 엑셀 다운로드 완료');
+        
+    } catch (error) {
+        console.error('❌ 전체 데이터 다운로드 오류:', error);
+        progressModal.style.display = 'none';
+        
+        if (error.code === 'permission-denied') {
+            showToast('권한이 없습니다. 관리자 권한을 확인해주세요.', 'error');
+        } else if (error.code === 'unavailable') {
+            showToast('네트워크 오류가 발생했습니다. 다시 시도해주세요.', 'error');
+        } else {
+            showToast('다운로드 중 오류가 발생했습니다', 'error');
+        }
     }
 }
 

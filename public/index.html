@@ -92,10 +92,10 @@
                             <div class="action-title">목록 보기</div>
                             <div class="action-desc">전체 물품 조회</div>
                         </button>
-                        <button class="action-card" onclick="document.getElementById('exportExcel').click()">
+                        <button class="action-card" onclick="document.getElementById('exportExcelAll').click()">
                             <div class="action-icon">📊</div>
                             <div class="action-title">엑셀 다운로드</div>
-                            <div class="action-desc">데이터 내보내기</div>
+                            <div class="action-desc">전체 데이터 내보내기</div>
                         </button>
                     </div>
                 </div>
@@ -462,8 +462,12 @@
 
             <div class="manage-section">
                 <h2>📤 데이터 내보내기</h2>
+                <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 12px;">
+                    💡 <strong>현재 페이지</strong>는 빠르게 다운로드되며, <strong>전체 데이터</strong>는 시간이 걸릴 수 있습니다.
+                </p>
                 <div class="export-buttons">
-                    <button class="btn btn-success" id="exportExcel">📊 엑셀로 다운로드</button>
+                    <button class="btn btn-success" id="exportExcel">📊 현재 페이지 다운로드</button>
+                    <button class="btn btn-primary" id="exportExcelAll">📊 전체 데이터 다운로드</button>
                     <button class="btn btn-secondary" id="exportJson">💾 JSON으로 다운로드</button>
                 </div>
             </div>
@@ -478,6 +482,26 @@
 
     <!-- 알림 토스트 -->
     <div id="toast" class="toast"></div>
+
+    <!-- 프로그레스 모달 -->
+    <div id="progressModal" class="modal" style="display: none;">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2>📥 데이터 다운로드 중</h2>
+            </div>
+            <div class="modal-body">
+                <div id="progressMessage" style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px;">
+                    준비 중...
+                </div>
+                <div style="width: 100%; height: 8px; background: var(--gray-200); border-radius: 4px; overflow: hidden;">
+                    <div id="progressBar" style="width: 0%; height: 100%; background: var(--primary); transition: width 0.3s;"></div>
+                </div>
+                <div id="progressPercent" style="font-size: 12px; color: var(--text-secondary); margin-top: 8px; text-align: center;">
+                    0%
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- 수정 모달 -->
     <div id="editModal" class="modal">
