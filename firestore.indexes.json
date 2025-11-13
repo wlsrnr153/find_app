@@ -5,6 +5,16 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "timestamp",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "items",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
           "fieldPath": "userEmail",
           "order": "ASCENDING"
         },

@@ -1970,14 +1970,25 @@ async function exportExcelAll() {
         
     } catch (error) {
         console.error('❌ 전체 데이터 다운로드 오류:', error);
+        console.error('오류 상세:', {
+            code: error.code,
+            message: error.message,
+            name: error.name
+        });
         progressModal.style.display = 'none';
         
         if (error.code === 'permission-denied') {
             showToast('권한이 없습니다. 관리자 권한을 확인해주세요.', 'error');
         } else if (error.code === 'unavailable') {
             showToast('네트워크 오류가 발생했습니다. 다시 시도해주세요.', 'error');
+        } else if (error.code === 'failed-precondition') {
+            showToast('Firestore 인덱스가 생성 중입니다. 잠시 후 다시 시도해주세요.', 'error');
+            console.error('💡 인덱스 생성이 필요합니다. Firebase Console에서 인덱스 링크를 확인하세요.');
+        } else if (error.message && error.message.includes('index')) {
+            showToast('데이터베이스 인덱스 생성이 필요합니다. 관리자에게 문의하세요.', 'error');
+            console.error('💡 인덱스 오류:', error.message);
         } else {
-            showToast('다운로드 중 오류가 발생했습니다', 'error');
+            showToast(`다운로드 중 오류가 발생했습니다: ${error.message || error.code || '알 수 없는 오류'}`, 'error');
         }
     }
 }
