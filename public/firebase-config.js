@@ -18,6 +18,7 @@ firebase.initializeApp(firebaseConfig);
 // Firebase 서비스 초기화
 const auth = firebase.auth();
 const db = firebase.firestore();
+const functions = firebase.functions();
 
 // 한국어 설정
 auth.languageCode = 'ko';
