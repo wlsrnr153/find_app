@@ -673,49 +673,14 @@ function initEventListeners() {
     });
 }
 
-// 전체 데이터 개수 가져오기 (count 쿼리 사용 - 효율적)
-async function loadTotalCount() {
-    try {
-        let countQuery = db.collection('items');
-        
-        // 일반 사용자는 본인 데이터만 카운트
-        if (currentUserRole !== 'admin') {
-            countQuery = countQuery.where('userId', '==', currentUser.uid);
-        }
-        
-        // Firebase compat 모드에서 count 쿼리 사용
-        // count().get() 방식이 작동하지 않을 수 있으므로 폴백 방식 준비
-        let snapshot;
-        try {
-            // 먼저 count().get() 방식 시도
-            snapshot = await countQuery.count().get();
-            // snapshot.data()가 존재하는지 확인
-            if (snapshot && snapshot.data && snapshot.data().count !== undefined) {
-                totalItemCount = snapshot.data().count;
-            } else {
-                throw new Error('count() 결과가 올바르지 않습니다');
-            }
-        } catch (countError) {
-            // count().get()이 실패하면 실제 문서를 읽지 않고 현재 로드된 데이터 사용
-            // 실제 문서를 읽으면 읽기 횟수가 문서 개수만큼 발생하므로 비효율적
-            console.log('⚠️ count().get() 실패, 현재 로드된 데이터 개수 사용:', countError.message);
-            // 현재 로드된 items 길이를 사용 (읽기 0회)
-            // 실제 전체 개수는 나중에 데이터 로드 시 업데이트될 수 있음
-            totalItemCount = items.length;
-            updateItemCount();
-            return;
-        }
-        
-        console.log(`📊 전체 데이터 개수: ${totalItemCount}개 (count 쿼리 - 읽기 1회)`);
-        totalReads += 1; // count 쿼리는 읽기 1회로 계산됨
-        
-        updateItemCount();
-    } catch (error) {
-        console.error('전체 개수 로드 오류:', error);
-        // 모든 방법이 실패한 경우 현재 로드된 items 길이 사용
-        totalItemCount = items.length;
-        updateItemCount();
-    }
+// 전체 데이터 개수 업데이트 (현재 로드된 데이터 기준 - 읽기 0회)
+function updateTotalCount() {
+    // 현재 로드된 items 배열의 길이 사용
+    // 실시간 리스너가 데이터를 동기화하므로 정확함
+    totalItemCount = items.length;
+    updateItemCount();
+    
+    console.log(`📊 전체 데이터 개수: ${totalItemCount}개 (캐시 - 읽기 0회)`);
 }
 
 // 일반 사용자용 이중 쿼리 로드 (userId + userEmail 병합)
@@ -914,8 +879,8 @@ function loadItems() {
         return;
     }
     
-    // 전체 개수 로드 (페이지네이션과 무관)
-    loadTotalCount();
+    // 전체 개수 업데이트 (현재 로드된 데이터 기준)
+    updateTotalCount();
     
     console.log('🔄 실시간 리스너 등록 중... (역할별 필터링)');
     
@@ -1041,7 +1006,7 @@ function setupAdminRealtimeListener(query) {
                     
                     // 데이터 변경 시 전체 개수 업데이트 (추가/삭제만)
                     if (addedCount > 0 || removedCount > 0) {
-                        loadTotalCount();
+                        updateTotalCount();
                     }
                 }
             }
@@ -1280,12 +1245,13 @@ function displayItems(itemsToShow) {
 
 // 물품 수 업데이트
 function updateItemCount() {
-    if (totalItemCount > 0) {
-        // 관리자/일반 사용자 모두: 전체 개수만 표시
-        itemCount.textContent = `총 ${totalItemCount}개 물품`;
+    const count = totalItemCount > 0 ? totalItemCount : items.length;
+    
+    // 관리자가 페이지네이션 사용 중이고 더 많은 페이지가 있으면 "이상" 표시
+    if (currentUserRole === 'admin' && hasMorePages && currentPage > 1) {
+        itemCount.textContent = `총 ${count}개 이상 물품`;
     } else {
-        // 로딩 중이거나 데이터가 없는 경우
-        itemCount.textContent = `총 ${items.length}개 물품`;
+        itemCount.textContent = `총 ${count}개 물품`;
     }
 }
 
