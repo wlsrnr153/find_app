@@ -119,6 +119,50 @@ exports.onUserCreate = functions.auth.user().onCreate(async (user) => {
 });
 
 /**
+ * 사용자 본인의 Custom Claims 동기화 (자동 마이그레이션)
+ * 모든 로그인한 사용자가 본인의 Custom Claims를 동기화할 수 있음
+ */
+exports.syncMyCustomClaims = functions.https.onCall(async (data, context) => {
+  // 인증 확인
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다');
+  }
+  
+  const userId = context.auth.uid;
+  
+  try {
+    // Firestore에서 사용자 역할 확인
+    const userDoc = await admin.firestore().collection('users').doc(userId).get();
+    
+    if (!userDoc.exists) {
+      throw new functions.https.HttpsError('not-found', '사용자 정보를 찾을 수 없습니다');
+    }
+    
+    const role = userDoc.data().role || 'user';
+    
+    // Custom Claims 설정
+    await admin.auth().setCustomUserClaims(userId, { role });
+    
+    console.log(`✅ Custom Claims 동기화 완료: ${userId} (${role})`);
+    
+    return {
+      success: true,
+      role: role,
+      message: 'Custom Claims가 동기화되었습니다'
+    };
+    
+  } catch (error) {
+    console.error('Custom Claims 동기화 오류:', error);
+    
+    if (error instanceof functions.https.HttpsError) {
+      throw error;
+    }
+    
+    throw new functions.https.HttpsError('internal', 'Custom Claims 동기화 중 오류가 발생했습니다');
+  }
+});
+
+/**
  * 기존 사용자의 Custom Claims 마이그레이션 (일회성 실행용)
  * 호출 방법: Firebase Console의 Functions 탭에서 수동 호출
  */
@@ -184,6 +228,7 @@ exports.migrateExistingUsers = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('internal', '마이그레이션 중 오류가 발생했습니다');
   }
 });
+
 
 
 

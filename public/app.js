@@ -123,13 +123,14 @@ async function initUserRole() {
             currentUserRole = firestoreRole;
             console.log(`📝 기존 사용자 역할 (Firestore): ${currentUserRole}`);
             
-            // 🔧 Custom Claims 마이그레이션 시도
-            console.log('🔄 Custom Claims 설정 시도 (마이그레이션)...');
+            // 🔧 Custom Claims 동기화 시도 (새 함수 사용)
+            console.log('🔄 Custom Claims 동기화 시도...');
             try {
-                const setRole = firebase.functions().httpsCallable('setUserRole');
-                const result = await setRole({ userId: currentUser.uid, role: currentUserRole });
+                // 🆕 자기 자신의 Custom Claims를 동기화하는 새 함수 사용
+                const syncClaims = firebase.functions().httpsCallable('syncMyCustomClaims');
+                const result = await syncClaims();
                 
-                console.log('✅ Custom Claims 설정 결과:', result.data);
+                console.log('✅ Custom Claims 동기화 결과:', result.data);
                 
                 // 토큰 강제 갱신하여 Custom Claims 즉시 적용
                 await currentUser.getIdToken(true);
@@ -138,16 +139,26 @@ async function initUserRole() {
                 const newTokenResult = await currentUser.getIdTokenResult(true);
                 if (newTokenResult.claims.role) {
                     currentUserRole = newTokenResult.claims.role;
-                    console.log('✅ Custom Claims 마이그레이션 완료, 새 역할:', currentUserRole);
+                    console.log('✅ Custom Claims 동기화 완료, 역할:', currentUserRole);
+                    
+                    // 🎉 관리자 권한이 확인되면 알림
+                    if (currentUserRole === 'admin') {
+                        showToast('👑 관리자 권한이 활성화되었습니다', 'success');
+                    } else {
+                        showToast('사용자 정보가 업데이트되었습니다', 'success');
+                    }
                 } else {
                     console.warn('⚠️ Custom Claims가 아직 적용되지 않았습니다. 다음 로그인 시 적용됩니다.');
                 }
-                
-                showToast('사용자 정보가 업데이트되었습니다', 'success');
             } catch (functionError) {
-                console.warn('⚠️ Custom Claims 설정 실패:', functionError);
+                console.warn('⚠️ Custom Claims 동기화 실패:', functionError);
                 console.warn('   오류 코드:', functionError.code);
                 console.warn('   오류 메시지:', functionError.message);
+                
+                // ⚠️ 권한 오류가 아닌 경우에만 계속 진행
+                if (functionError.code !== 'permission-denied') {
+                    showToast('⚠️ 권한 동기화 실패 - 일부 기능이 제한될 수 있습니다', 'warning');
+                }
                 // 실패해도 계속 진행 (Firestore 역할 사용)
             }
         } else {
@@ -174,14 +185,21 @@ async function initUserRole() {
             
             console.log(`✅ 신규 사용자 등록: ${currentUserRole}`);
             
-            // Custom Claims도 즉시 설정 시도
+            // Custom Claims도 즉시 동기화 시도 (새 함수 사용)
             try {
-                const setRole = firebase.functions().httpsCallable('setUserRole');
-                await setRole({ userId: currentUser.uid, role: currentUserRole });
+                const syncClaims = firebase.functions().httpsCallable('syncMyCustomClaims');
+                await syncClaims();
                 await currentUser.getIdToken(true);
-                console.log('✅ 신규 사용자 Custom Claims 설정 완료');
+                console.log('✅ 신규 사용자 Custom Claims 동기화 완료');
+                
+                // 다시 확인
+                const newTokenResult = await currentUser.getIdTokenResult(true);
+                if (newTokenResult.claims.role) {
+                    currentUserRole = newTokenResult.claims.role;
+                }
             } catch (error) {
-                console.warn('⚠️ 신규 사용자 Custom Claims 설정 실패:', error);
+                console.warn('⚠️ 신규 사용자 Custom Claims 동기화 실패:', error);
+                // Cloud Function의 onUserCreate가 나중에 처리할 것임
             }
             
             if (isFirstUser) {
