@@ -161,19 +161,32 @@ function hideLoading() {
 // Firebase 에러 코드를 한국어 메시지로 변환
 function getErrorMessage(errorCode) {
     const errorMessages = {
-        'auth/email-already-in-use': '이미 사용 중인 이메일입니다',
+        // 로그인 관련 오류 - 보안상 동일한 메시지 표시
+        'auth/user-not-found': '아이디 또는 비밀번호가 틀립니다',
+        'auth/wrong-password': '아이디 또는 비밀번호가 틀립니다',
+        'auth/invalid-credential': '아이디 또는 비밀번호가 틀립니다',
+        'auth/invalid-login-credentials': '아이디 또는 비밀번호가 틀립니다',
         'auth/invalid-email': '올바른 이메일 형식이 아닙니다',
+        
+        // 회원가입 관련 오류
+        'auth/email-already-in-use': '이미 사용 중인 이메일입니다',
+        'auth/weak-password': '비밀번호가 너무 약합니다 (최소 6자 이상)',
         'auth/operation-not-allowed': '이메일/비밀번호 로그인이 비활성화되어 있습니다',
-        'auth/weak-password': '비밀번호가 너무 약합니다 (최소 6자)',
-        'auth/user-disabled': '비활성화된 계정입니다',
-        'auth/user-not-found': '존재하지 않는 계정입니다',
-        'auth/wrong-password': '비밀번호가 올바르지 않습니다',
+        
+        // 계정 상태 오류
+        'auth/user-disabled': '비활성화된 계정입니다. 관리자에게 문의하세요',
+        
+        // 보안 관련 오류
         'auth/too-many-requests': '너무 많은 시도가 있었습니다. 잠시 후 다시 시도해주세요',
-        'auth/network-request-failed': '네트워크 오류가 발생했습니다',
-        'auth/invalid-credential': '이메일 또는 비밀번호가 올바르지 않습니다'
+        
+        // 네트워크 오류
+        'auth/network-request-failed': '네트워크 오류가 발생했습니다. 인터넷 연결을 확인해주세요',
+        
+        // 기타 오류
+        'auth/internal-error': '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요'
     };
     
-    return errorMessages[errorCode] || `오류가 발생했습니다: ${errorCode}`;
+    return errorMessages[errorCode] || `오류가 발생했습니다. 잠시 후 다시 시도해주세요 (${errorCode})`;
 }
 
 // Firebase 설정 확인

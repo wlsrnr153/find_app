@@ -202,10 +202,27 @@
             margin-bottom: 20px;
             font-size: 14px;
             display: none;
+            border-left: 4px solid var(--danger);
         }
 
         .error-message.show {
             display: block;
+        }
+        
+        .help-text {
+            background: #eff6ff;
+            color: #1e40af;
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 15px;
+            font-size: 13px;
+            border-left: 4px solid var(--primary);
+            line-height: 1.6;
+        }
+        
+        .help-text strong {
+            display: block;
+            margin-bottom: 5px;
         }
 
         .success-message {
@@ -313,6 +330,14 @@
                 <div class="forgot-password">
                     <a href="#" id="forgotPasswordLink">비밀번호를 잊으셨나요?</a>
                 </div>
+                
+                <!-- 로그인 도움말 -->
+                <div class="help-text">
+                    <strong>💡 로그인이 안 되시나요?</strong>
+                    • <strong>처음 사용하시는 경우:</strong> 위의 "회원가입" 탭에서 계정을 먼저 만드세요<br>
+                    • <strong>다른 컴퓨터에서 접속:</strong> 처음 접속하는 PC/스마트폰에서는 회원가입이 필요합니다<br>
+                    • <strong>팀 계정 사용:</strong> 관리자에게 로그인 정보를 문의하세요
+                </div>
             </div>
 
             <!-- 회원가입 폼 -->
@@ -337,6 +362,14 @@
                     </div>
                     <button type="submit" class="login-btn">✅ 회원가입</button>
                 </form>
+                
+                <!-- 회원가입 도움말 -->
+                <div class="help-text">
+                    <strong>📌 회원가입 안내</strong>
+                    • <strong>각자 계정 생성:</strong> 팀원 각자 본인의 이메일로 회원가입하세요<br>
+                    • <strong>팀 계정 공유:</strong> 관리자가 하나의 계정을 만들어 팀원들과 공유할 수 있습니다<br>
+                    • <strong>비밀번호:</strong> 최소 6자 이상이면 됩니다 (예: hjs2025)
+                </div>
             </div>
 
             <div class="firebase-notice">
