@@ -91,7 +91,8 @@ async function loadItemsFromCache() {
             }
             
             const cacheAge = Date.now() - parseInt(cacheTimestamp);
-            if (cacheAge >= CACHE_DURATION) {
+            const allowStale = typeof navigator !== 'undefined' && navigator.onLine === false;
+            if (cacheAge >= CACHE_DURATION && !allowStale) {
                 console.log('⏰ 캐시 만료됨 (경과 시간:', Math.floor(cacheAge / 1000), '초)');
                 return { success: false, data: [] };
             }

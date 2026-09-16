@@ -125,6 +125,368 @@ body {
     font-size: 14px;
     opacity: 0.9;
     text-align: center;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.offline-status {
+    border: 0;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #1e3a8a;
+    background: #fde68a;
+    cursor: pointer;
+}
+
+.offline-status.is-offline {
+    background: #fecaca;
+    color: #7f1d1d;
+}
+
+.offline-status.is-syncing,
+.offline-status.is-pending {
+    background: #fde68a;
+    color: #78350f;
+}
+
+.pending-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.survey-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
+}
+
+.survey-bar label {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.survey-select {
+    flex: 1;
+    min-width: 160px;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.95);
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.survey-badge {
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.22);
+    white-space: nowrap;
+}
+
+.survey-badge.is-active {
+    background: #10b981;
+}
+
+.survey-badge.is-closed {
+    background: #6b7280;
+}
+
+.btn-survey {
+    padding: 8px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.18);
+    color: white;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.btn-survey:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.survey-input-banner {
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: #dbeafe;
+    color: #1e3a8a;
+    font-size: 14px;
+}
+
+.survey-input-banner.is-warning {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.survey-input-banner.is-closed {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+body.dark-mode .survey-input-banner {
+    background: #1e3a8a;
+    color: #dbeafe;
+}
+
+body.dark-mode .survey-input-banner.is-warning {
+    background: #78350f;
+    color: #fde68a;
+}
+
+body.dark-mode .survey-input-banner.is-closed {
+    background: #7f1d1d;
+    color: #fecaca;
+}
+
+.form-row-3 {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+.location-preview {
+    margin: -4px 0 16px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.survey-item-status {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-left: 8px;
+}
+
+.asset-input-row {
+    display: flex;
+    gap: 8px;
+}
+
+.asset-input-row input {
+    flex: 1;
+}
+
+.asset-check-banner {
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+}
+
+.asset-check-banner.is-success {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.asset-check-banner.is-warning {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.asset-check-banner.is-danger {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.asset-check-banner.is-info {
+    background: #dbeafe;
+    color: #1e3a8a;
+}
+
+.register-progress-card {
+    background: var(--bg-primary);
+    padding: 16px;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+}
+
+.register-progress-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.register-progress-head strong {
+    font-size: 28px;
+}
+
+.register-progress-track {
+    height: 10px;
+    background: var(--gray-200);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-bottom: 14px;
+}
+
+.register-progress-bar {
+    width: 0;
+    height: 100%;
+    background: var(--primary);
+    transition: width 0.3s;
+}
+
+.register-progress-stats {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    text-align: center;
+}
+
+.register-progress-stats b {
+    display: block;
+    font-size: 18px;
+}
+
+.register-progress-stats span {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.register-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0 16px;
+}
+
+.register-empty {
+    color: var(--text-secondary);
+    font-size: 14px;
+    text-align: center;
+    padding: 24px 8px;
+}
+
+.register-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--gray-50);
+    border-radius: 8px;
+    border: 2px solid var(--gray-200);
+}
+
+.register-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.qr-reader {
+    width: 100%;
+    min-height: 240px;
+    background: #111;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.modal-wide {
+    max-width: 760px;
+}
+
+.register-map-summary,
+.register-map-profile {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+}
+
+.register-map-sheet {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.register-map-sheet select {
+    flex: 1;
+    padding: 8px 10px;
+    border: 2px solid var(--gray-200);
+    border-radius: 8px;
+    font-weight: 500;
+}
+
+.register-map-profile {
+    background: #dbeafe;
+    color: #1e3a8a;
+    padding: 10px 12px;
+    border-radius: 8px;
+}
+
+.register-map-fields {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.register-map-row {
+    display: grid;
+    grid-template-columns: 110px 1fr 140px;
+    gap: 8px;
+    align-items: center;
+}
+
+.register-map-row label {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.register-map-row select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 2px solid var(--gray-200);
+    border-radius: 8px;
+}
+
+.register-map-sample {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.register-preview-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+
+.register-preview-table th,
+.register-preview-table td {
+    border: 1px solid var(--gray-200);
+    padding: 8px;
+    text-align: left;
+}
+
+.survey-item-status.active {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.survey-item-status.closed {
+    background: #e5e7eb;
+    color: #374151;
 }
 
 /* 탭 메뉴 */
@@ -221,6 +583,10 @@ body {
     gap: 12px;
 }
 
+.form-row.form-row-3 {
+    grid-template-columns: repeat(3, 1fr);
+}
+
 .form-actions {
     display: flex;
     gap: 10px;
@@ -280,6 +646,7 @@ body {
 /* 목록 컨트롤 */
 .list-controls {
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
     margin-bottom: 20px;
 }
@@ -298,6 +665,18 @@ body {
 
 .list-controls select {
     min-width: 120px;
+}
+
+.list-controls input[type="date"] {
+    flex: 0 0 auto;
+    min-width: 140px;
+}
+
+.dashboard-scope {
+    margin: -8px 0 16px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    text-align: center;
 }
 
 /* 아이템 리스트 */
@@ -498,6 +877,10 @@ body {
 
 .toast.error {
     background: var(--danger);
+}
+
+.toast.info {
+    background: #0369a1;
 }
 
 /* 모달 */
@@ -1282,6 +1665,20 @@ body {
         padding: 6px 10px;
         font-size: 14px;
     }
+
+    .survey-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .survey-select,
+    .btn-survey {
+        width: 100%;
+    }
+
+    .form-row-3 {
+        grid-template-columns: 1fr;
+    }
     
     .header-info {
         font-size: 12px;
@@ -1295,8 +1692,8 @@ body {
     }
     
     .tab-btn {
-        padding: 12px 8px;
-        font-size: 13px;
+        padding: 12px 6px;
+        font-size: 12px;
         white-space: nowrap;
     }
     
@@ -1336,6 +1733,18 @@ body {
     }
     
     /* 빠른 액션 버튼 최적화 */
+    .register-progress-stats {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .asset-input-row {
+        flex-direction: column;
+    }
+
+    .register-map-row {
+        grid-template-columns: 1fr;
+    }
+
     .quick-actions {
         padding: 16px;
         margin-bottom: 16px;

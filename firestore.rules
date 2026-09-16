@@ -2,49 +2,63 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // 🔥 최적화: Custom Claims 사용 - get() 호출 없음! (읽기 0회)
-    // 이전: getUserRole()에서 매번 users 문서를 읽음 (읽기 +1)
-    // 현재: 토큰에서 바로 읽음 (읽기 0회)
     function isAdmin() {
       return request.auth != null && request.auth.token.role == 'admin';
     }
     
-    // 사용자 문서 - 모든 로그인한 사용자가 읽기 가능, 본인 또는 관리자만 쓰기
     match /users/{userId} {
-      // 로그인한 모든 사용자가 읽기 가능 (첫 사용자 확인 및 사용자 목록 조회용)
       allow read: if request.auth != null;
-      
-      // 신규 사용자 생성 (본인 문서만)
       allow create: if request.auth != null && request.auth.uid == userId;
-      
-      // 본인 또는 관리자만 업데이트 가능
       allow update: if request.auth != null && 
                    (request.auth.uid == userId || isAdmin());
     }
     
-    // 물품 문서 - 역할별 권한 (관리자: 전체, 일반 사용자: 본인 것만)
     match /items/{itemId} {
-      // 관리자는 모든 물품 읽기 가능, 일반 사용자는 본인 물품만 읽기 가능
       allow read: if request.auth != null && 
                   (isAdmin() || resource.data.userId == request.auth.uid);
       
-      // 로그인한 모든 사용자가 생성 가능
       allow create: if request.auth != null
                     && request.resource.data.userId == request.auth.uid
                     && request.resource.data.userEmail == request.auth.token.email;
       
-      // 관리자, 작성자, 또는 userId가 없는 기존 물품(하위 호환성)은 수정 가능
       allow update: if request.auth != null && 
                     (isAdmin() || 
                      resource.data.userId == request.auth.uid ||
                      !("userId" in resource.data));
       
-      // 관리자만 삭제 가능
       allow delete: if request.auth != null && isAdmin();
+    }
+
+    // 조사 회차 - 로그인한 사용자 모두 조회, 생성 가능
+    match /surveys/{surveyId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+                    && request.resource.data.createdBy == request.auth.uid;
+      allow update: if request.auth != null &&
+                    (isAdmin() || resource.data.createdBy == request.auth.uid);
+      allow delete: if request.auth != null && isAdmin();
+    }
+
+    // 공유 기관 마스터
+    match /organizations/{orgId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null &&
+                    (isAdmin() || resource.data.createdBy == request.auth.uid);
+    }
+
+    // 공유 위치 마스터
+    match /locations/{locationId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null &&
+                    (isAdmin() || resource.data.createdBy == request.auth.uid);
+    }
+
+    // 대장 분할 저장 - 회차별 대용량 목록
+    match /registerChunks/{chunkId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if request.auth != null;
     }
   }
 }
-
-
-
-

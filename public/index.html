@@ -6,8 +6,12 @@
     <!-- iOS Safari 호환성 -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#2563eb">
     <meta name="format-detection" content="telephone=no">
     <title>물품 조사 시스템입니다.</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -24,6 +28,15 @@
             </div>
             <div class="header-info">
                 <span id="itemCount">총 0개 물품</span>
+                <button type="button" id="offlineStatus" class="offline-status" hidden></button>
+            </div>
+            <div class="survey-bar">
+                <label for="surveySelect">조사 회차</label>
+                <select id="surveySelect" class="survey-select">
+                    <option value="__all__">전체 회차</option>
+                </select>
+                <span id="surveyStatusBadge" class="survey-badge">전체</span>
+                <button type="button" id="manageSurveysBtn" class="btn-survey">회차 관리</button>
             </div>
         </header>
 
@@ -32,6 +45,7 @@
             <button class="tab-btn active" data-tab="dashboard">🏠 대시보드</button>
             <button class="tab-btn" data-tab="input">📝 입력</button>
             <button class="tab-btn" data-tab="list">📋 목록</button>
+            <button class="tab-btn" data-tab="register">🔎 대조</button>
             <button class="tab-btn" data-tab="manage">⚙️ 관리</button>
         </div>
 
@@ -77,6 +91,25 @@
                         </div>
                     </div>
                 </div>
+                <p id="dashboardScope" class="dashboard-scope"></p>
+
+                <div id="registerProgressCard" class="dashboard-section register-progress-card" style="display: none;">
+                    <h2>🔎 실사 진행률</h2>
+                    <div class="register-progress-head">
+                        <strong id="registerPercent">0%</strong>
+                        <span>대장 대비 확인 완료</span>
+                    </div>
+                    <div class="register-progress-track">
+                        <div id="registerProgressBar" class="register-progress-bar"></div>
+                    </div>
+                    <div class="register-progress-stats">
+                        <div><b id="registerExpected">0</b><span>예정</span></div>
+                        <div><b id="registerFound">0</b><span>찾음</span></div>
+                        <div><b id="registerPending">0</b><span>미조사</span></div>
+                        <div><b id="registerMissing">0</b><span>미발견</span></div>
+                        <div><b id="registerDiscovered">0</b><span>신규</span></div>
+                    </div>
+                </div>
 
                 <!-- 빠른 액션 -->
                 <div class="quick-actions">
@@ -107,6 +140,16 @@
                 </div>
 
                 <!-- 최근 물품 -->
+                <div class="dashboard-section">
+                    <h2>👤 조사자별</h2>
+                    <div id="surveyorChart" class="category-chart"></div>
+                </div>
+
+                <div class="dashboard-section">
+                    <h2>📍 위치별</h2>
+                    <div id="locationChart" class="category-chart"></div>
+                </div>
+
                 <div class="dashboard-section">
                     <h2>🕐 최근 추가된 물품</h2>
                     <div id="recentItemsList" class="recent-items-list"></div>
@@ -170,6 +213,10 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <div id="surveyInputBanner" class="survey-input-banner">
+                현재 회차에 물품이 등록됩니다.
             </div>
 
             <!-- 연속 등록 모드 컨트롤 -->
@@ -273,9 +320,26 @@
                     <input type="text" id="organization" name="organization" placeholder="예: 현대건설">
                 </div>
 
-                <div class="form-group" data-field="location">
-                    <label for="location">사용위치</label>
-                    <input type="text" id="location" name="location" placeholder="예: 본사 3층 회의실">
+                <div class="form-section" data-field="location">
+                    <div class="form-section-title">📍 사용위치</div>
+                    <div class="form-row form-row-3">
+                        <div class="form-group">
+                            <label for="building">건물</label>
+                            <input list="buildingList" type="text" id="building" name="building" placeholder="예: 본사">
+                            <datalist id="buildingList"></datalist>
+                        </div>
+                        <div class="form-group">
+                            <label for="floor">층</label>
+                            <input list="floorList" type="text" id="floor" name="floor" placeholder="예: 3층">
+                            <datalist id="floorList"></datalist>
+                        </div>
+                        <div class="form-group">
+                            <label for="room">실/호</label>
+                            <input list="roomList" type="text" id="room" name="room" placeholder="예: 회의실">
+                            <datalist id="roomList"></datalist>
+                        </div>
+                    </div>
+                    <p class="location-preview" id="locationPreview">선택된 위치: 미입력</p>
                 </div>
 
                 <div class="form-group" data-field="itemName">
@@ -285,8 +349,12 @@
 
                 <div class="form-group" data-field="assetNumber">
                     <label for="assetNumber">자산번호</label>
-                    <input type="text" id="assetNumber" name="assetNumber" 
-                           placeholder="예: ASSET-001 또는 1234567890">
+                    <div class="asset-input-row">
+                        <input type="text" id="assetNumber" name="assetNumber" 
+                               placeholder="예: ASSET-001 또는 바코드 스캔">
+                        <button type="button" id="scanAssetBtn" class="btn btn-secondary">📷 스캔</button>
+                    </div>
+                    <div id="assetCheckBanner" class="asset-check-banner" style="display: none;"></div>
                 </div>
 
                 <div class="form-group" data-field="quantity">
@@ -374,7 +442,10 @@
         <!-- 목록 탭 -->
         <div class="tab-content" id="list">
             <div class="list-controls">
-                <input type="text" id="searchInput" placeholder="🔍 검색 (물품명, 조사자, 제조사 등)">
+                <input type="text" id="searchInput" placeholder="🔍 검색 (물품명, 자산번호, 기관, 위치, 조사자 등)">
+                <select id="filterOrganization">
+                    <option value="">전체 기관</option>
+                </select>
                 <select id="filterCategory">
                     <option value="">전체 카테고리</option>
                     <option value="가구">가구</option>
@@ -382,6 +453,20 @@
                     <option value="사무용품">사무용품</option>
                     <option value="기타">기타</option>
                 </select>
+                <select id="filterCondition">
+                    <option value="">전체 상태</option>
+                    <option value="매우 좋음">매우 좋음</option>
+                    <option value="좋음">좋음</option>
+                    <option value="보통">보통</option>
+                    <option value="나쁨">나쁨</option>
+                    <option value="매우 나쁨">매우 나쁨</option>
+                </select>
+                <select id="filterSurveyor">
+                    <option value="">전체 조사자</option>
+                </select>
+                <input type="text" id="filterLocation" placeholder="위치 (건물/층/실)">
+                <input type="date" id="filterDateFrom" title="시작일">
+                <input type="date" id="filterDateTo" title="종료일">
                 <select id="sortBy">
                     <option value="newest">최신순</option>
                     <option value="oldest">오래된순</option>
@@ -414,8 +499,41 @@
             </div>
         </div>
 
+        <!-- 대조 탭 -->
+        <div class="tab-content" id="register">
+            <div class="manage-section">
+                <h2>🔎 대장 대조</h2>
+                <p>선택한 회차의 예정 자산과 실제 조사 결과를 비교합니다.</p>
+                <div class="register-filter-row">
+                    <button type="button" class="btn btn-secondary btn-small active" data-register-filter="all">전체</button>
+                    <button type="button" class="btn btn-secondary btn-small" data-register-filter="pending">미조사</button>
+                    <button type="button" class="btn btn-secondary btn-small" data-register-filter="found">찾음</button>
+                    <button type="button" class="btn btn-secondary btn-small" data-register-filter="missing">미발견</button>
+                    <button type="button" class="btn btn-secondary btn-small" data-register-filter="new">신규</button>
+                </div>
+                <p id="registerEmpty" class="register-empty">대장을 보려면 조사 회차를 선택하세요.</p>
+                <div id="registerList" class="organization-list"></div>
+            </div>
+        </div>
+
         <!-- 관리 탭 -->
         <div class="tab-content" id="manage">
+            <div class="manage-section">
+                <h2>📋 조사 회차</h2>
+                <p>조사 단위를 나누면 연도·현장별로 데이터를 분리해서 볼 수 있습니다.</p>
+                <button class="btn btn-primary" id="manageSurveysBtn2">회차 관리 열기</button>
+            </div>
+
+            <div class="manage-section">
+                <h2>📑 자산 대장</h2>
+                <p>기관에서 쓰는 대장 엑셀을 그대로 올리세요. 열 이름을 분석해 자산번호·물품명 등에 맞춘 뒤 가져옵니다.</p>
+                <input type="file" id="importRegisterFile" accept=".xlsx,.xls,.csv" style="display: none;">
+                <div class="export-buttons">
+                    <button class="btn btn-primary" id="importRegisterBtn">📂 대장 엑셀 올리기</button>
+                    <button class="btn btn-secondary" id="downloadRegisterTemplateBtn">⬇️ 참고 양식</button>
+                </div>
+            </div>
+
             <!-- 사용자 관리 섹션 (관리자 전용) -->
             <div class="manage-section" id="userManagementSection" style="display: none;">
                 <h2>👥 사용자 관리</h2>
@@ -480,6 +598,82 @@
         </div>
     </div>
 
+    <!-- 조사 회차 관리 모달 -->
+    <div id="manageSurveysModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>조사 회차 관리</h2>
+                <button class="close-btn" id="closeManageSurveys">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="newSurveyName">새 회차 이름 *</label>
+                    <input type="text" id="newSurveyName" placeholder="예: 2026년 본사 정기조사">
+                </div>
+                <div class="form-group">
+                    <label for="newSurveyDescription">설명</label>
+                    <input type="text" id="newSurveyDescription" placeholder="대상 현장이나 목적을 적어주세요">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="newSurveyStart">시작일</label>
+                        <input type="date" id="newSurveyStart">
+                    </div>
+                    <div class="form-group">
+                        <label for="newSurveyEnd">종료일</label>
+                        <input type="date" id="newSurveyEnd">
+                    </div>
+                </div>
+                <div class="form-actions" style="margin-bottom: 20px;">
+                    <button type="button" class="btn btn-primary" id="saveSurveyBtn">✅ 회차 추가</button>
+                </div>
+                <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 12px;">
+                    진행 중인 회차만 입력에 사용할 수 있습니다. 마감하면 해당 회차는 조회만 가능합니다.
+                </p>
+                <div id="surveyList" class="organization-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="registerMapModal" class="modal">
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h2>대장 열 맞추기</h2>
+                <button class="close-btn" id="closeRegisterMap">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="registerMapSummary" class="register-map-summary"></p>
+                <label id="registerSheetWrap" class="register-map-sheet" style="display: none;">
+                    시트 선택
+                    <select id="registerSheetSelect"></select>
+                </label>
+                <p id="registerMapProfile" class="register-map-profile" style="display: none;"></p>
+                <div id="registerMapFields" class="register-map-fields"></div>
+                <h3 class="form-section-title">미리보기</h3>
+                <div id="registerMapPreview" class="register-map-preview"></div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-primary" id="confirmRegisterMapBtn">✅ 이 매핑으로 가져오기</button>
+                    <button type="button" class="btn btn-secondary" id="cancelRegisterMapBtn">취소</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="scanModal" class="modal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2>자산번호 스캔</h2>
+                <button class="close-btn" id="closeScanModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="qrReader" class="qr-reader"></div>
+                <p id="scanFallback" class="register-empty" style="display: none;">
+                    이 브라우저는 카메라 스캔을 지원하지 않습니다. 자산번호를 직접 입력하세요.
+                </p>
+            </div>
+        </div>
+    </div>
+
     <!-- 알림 토스트 -->
     <div id="toast" class="toast"></div>
 
@@ -523,9 +717,24 @@
                     <input type="text" id="editOrganization" name="organization">
                 </div>
 
+                <div class="form-section-title">📍 사용위치</div>
+                <div class="form-row form-row-3">
+                    <div class="form-group">
+                        <label for="editBuilding">건물</label>
+                        <input type="text" id="editBuilding" name="building">
+                    </div>
+                    <div class="form-group">
+                        <label for="editFloor">층</label>
+                        <input type="text" id="editFloor" name="floor">
+                    </div>
+                    <div class="form-group">
+                        <label for="editRoom">실/호</label>
+                        <input type="text" id="editRoom" name="room">
+                    </div>
+                </div>
                 <div class="form-group">
-                    <label for="editLocation">사용위치</label>
-                    <input type="text" id="editLocation" name="location">
+                    <label for="editLocation">위치 표시명</label>
+                    <input type="text" id="editLocation" name="location" placeholder="비우면 건물/층/실로 자동 생성">
                 </div>
 
                 <div class="form-group">
@@ -628,12 +837,27 @@
     
     <!-- SheetJS for Excel -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     
     <!-- 캐시 최적화 스크립트 (먼저 로드) -->
     <script src="app-optimized.js"></script>
+    <script src="offline-queue.js"></script>
+    
+    <!-- 조사 회차 / 기관 / 위치 마스터 -->
+    <script src="masters.js"></script>
+    <script src="register.js"></script>
     
     <!-- 메인 앱 스크립트 -->
     <script src="app.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js').catch((error) => {
+                    console.warn('서비스워커 등록 실패:', error);
+                });
+            });
+        }
+    </script>
 </body>
 </html>
 

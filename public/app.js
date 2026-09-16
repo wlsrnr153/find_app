@@ -27,9 +27,14 @@ let sessionStart = Date.now();
 // 📄 페이지네이션 (관리자용)
 let currentPage = 1;
 let lastVisible = null;
-const ADMIN_PAGE_SIZE = 50; // 관리자는 50개씩
+const ADMIN_PAGE_SIZE = 50; // 목록 화면 한 페이지
+const ADMIN_FETCH_BATCH = 400;
 let hasMorePages = true;
 let totalItemCount = 0; // 전체 데이터 개수 (페이지와 무관)
+let listPage = 1;
+let lastFilteredItems = [];
+let adminFullLoadDone = false;
+let adminFullLoadPromise = null;
 
 // 🚀 Firebase 오프라인 지속성 활성화 (읽기 최적화)
 db.enablePersistence({ synchronizeTabs: true })
@@ -244,7 +249,15 @@ async function initApp() {
     console.log('🚀 앱 초기화 시작');
     
     initDarkMode();
-    initOrganizations();
+    if (typeof initOrganizations === 'function') {
+        initOrganizations();
+    }
+    if (typeof initRegister === 'function') {
+        initRegister();
+    }
+    if (typeof initOfflineQueue === 'function') {
+        initOfflineQueue();
+    }
     initTabs();
     initEventListeners();
     initRoleBasedUI();
@@ -257,14 +270,22 @@ async function initApp() {
             if (cacheResult.success && cacheResult.data.length > 0) {
                 // 캐시 데이터를 items에 할당
                 items = cacheResult.data;
+                if (typeof mergeOfflineQueueIntoItems === 'function') {
+                    await mergeOfflineQueueIntoItems();
+                }
                 
                 // 🔥 중요: 캐시에서 로드했으므로 초기 로드 완료로 표시
                 initialLoadComplete = true;
                 
                 // 즉시 화면에 표시 (정렬 적용)
-                const sortedItems = sortItems(items, currentSort);
+                const sortedItems = sortItems(getItemsForView(), currentSort);
                 displayItems(sortedItems);
                 updateItemCount();
+                if (typeof refreshVisibleViews === 'function') {
+                    updateSurveySelect();
+                    updateSurveyBanner();
+                    updateFilterOrganization();
+                }
                 
                 console.log('✅ 캐시 데이터 표시 완료 - Firebase 동기화 시작 (변경사항만 감지)');
             } else {
@@ -331,193 +352,13 @@ function initRoleBasedUI() {
     console.log('✅ 역할별 UI 초기화 완료');
 }
 
-// 기관 관리 초기화
-function initOrganizations() {
-    // localStorage에서 기관 목록 로드
-    loadOrganizations();
-    
-    // 기관 선택 이벤트
-    const organizationSelect = document.getElementById('organizationSelect');
-    organizationSelect.addEventListener('change', (e) => {
-        selectOrganization(e.target.value);
-    });
-    
-    // 기관 추가 버튼
-    document.getElementById('addOrganizationBtn').addEventListener('click', openAddOrganizationModal);
-    
-    // 기관 관리 버튼
-    document.getElementById('manageOrganizationsBtn').addEventListener('click', openManageOrganizationsModal);
-    
-    // 기관 해제 버튼
-    document.getElementById('clearOrganizationBtn').addEventListener('click', clearOrganization);
-    
-    // 추가 모달
-    document.getElementById('closeAddOrganization').addEventListener('click', closeAddOrganizationModal);
-    document.getElementById('cancelAddOrganizationBtn').addEventListener('click', closeAddOrganizationModal);
-    document.getElementById('saveOrganizationBtn').addEventListener('click', saveNewOrganization);
-    
-    // 관리 모달
-    document.getElementById('closeManageOrganizations').addEventListener('click', closeManageOrganizationsModal);
-    
-    // 모달 외부 클릭
-    document.getElementById('addOrganizationModal').addEventListener('click', (e) => {
-        if (e.target.id === 'addOrganizationModal') closeAddOrganizationModal();
-    });
-    document.getElementById('manageOrganizationsModal').addEventListener('click', (e) => {
-        if (e.target.id === 'manageOrganizationsModal') closeManageOrganizationsModal();
-    });
-    
-    // Enter 키로 기관 추가
-    document.getElementById('newOrganizationName').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') saveNewOrganization();
-    });
-}
+// 기관/회차/위치 마스터는 masters.js에서 관리합니다.
 
-// 기관 목록 로드
-function loadOrganizations() {
-    const saved = localStorage.getItem('organizations');
-    organizations = saved ? JSON.parse(saved) : [];
-    updateOrganizationSelect();
-}
-
-// 기관 목록 저장
-function saveOrganizations() {
-    localStorage.setItem('organizations', JSON.stringify(organizations));
-}
-
-// 기관 선택 드롭다운 업데이트
-function updateOrganizationSelect() {
-    const select = document.getElementById('organizationSelect');
-    select.innerHTML = '<option value="">기관을 선택하세요</option>';
-    
-    organizations.forEach(org => {
-        const option = document.createElement('option');
-        option.value = org;
-        option.textContent = org;
-        select.appendChild(option);
-    });
-}
-
-// 기관 선택
-function selectOrganization(orgName) {
-    if (orgName) {
-        currentOrganization = orgName;
-        document.getElementById('organization').value = orgName;
-        document.getElementById('selectedOrgName').textContent = orgName;
-        document.getElementById('selectedOrganizationInfo').style.display = 'flex';
-        showToast(`"${orgName}" 기관이 선택되었습니다`, 'success');
-    } else {
-        clearOrganization();
+function getItemsForView(source) {
+    if (typeof getVisibleItems === 'function') {
+        return getVisibleItems(source);
     }
-}
-
-// 기관 선택 해제
-function clearOrganization() {
-    currentOrganization = '';
-    document.getElementById('organizationSelect').value = '';
-    document.getElementById('organization').value = '';
-    document.getElementById('selectedOrganizationInfo').style.display = 'none';
-}
-
-// 기관 추가 모달 열기
-function openAddOrganizationModal() {
-    document.getElementById('newOrganizationName').value = '';
-    document.getElementById('addOrganizationModal').classList.add('show');
-    document.body.style.overflow = 'hidden';
-    setTimeout(() => document.getElementById('newOrganizationName').focus(), 100);
-}
-
-// 기관 추가 모달 닫기
-function closeAddOrganizationModal() {
-    document.getElementById('addOrganizationModal').classList.remove('show');
-    document.body.style.overflow = 'auto';
-}
-
-// 새 기관 저장
-function saveNewOrganization() {
-    const input = document.getElementById('newOrganizationName');
-    const orgName = input.value.trim();
-    
-    if (!orgName) {
-        showToast('기관명을 입력하세요', 'error');
-        return;
-    }
-    
-    if (organizations.includes(orgName)) {
-        showToast('이미 등록된 기관입니다', 'error');
-        return;
-    }
-    
-    organizations.push(orgName);
-    organizations.sort();
-    saveOrganizations();
-    updateOrganizationSelect();
-    closeAddOrganizationModal();
-    
-    // 자동 선택
-    document.getElementById('organizationSelect').value = orgName;
-    selectOrganization(orgName);
-    
-    showToast(`"${orgName}" 기관이 추가되었습니다`, 'success');
-}
-
-// 기관 관리 모달 열기
-function openManageOrganizationsModal() {
-    updateOrganizationList();
-    document.getElementById('manageOrganizationsModal').classList.add('show');
-    document.body.style.overflow = 'hidden';
-}
-
-// 기관 관리 모달 닫기
-function closeManageOrganizationsModal() {
-    document.getElementById('manageOrganizationsModal').classList.remove('show');
-    document.body.style.overflow = 'auto';
-}
-
-// 기관 목록 표시
-function updateOrganizationList() {
-    const list = document.getElementById('organizationList');
-    
-    if (organizations.length === 0) {
-        list.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 40px;">등록된 기관이 없습니다</p>';
-        return;
-    }
-    
-    // 각 기관의 사용 횟수 계산
-    const orgCounts = {};
-    items.forEach(item => {
-        if (item.organization) {
-            orgCounts[item.organization] = (orgCounts[item.organization] || 0) + 1;
-        }
-    });
-    
-    list.innerHTML = organizations.map(org => `
-        <div class="organization-item">
-            <div>
-                <span class="organization-item-name">${org}</span>
-                <span class="organization-item-count">(${orgCounts[org] || 0}개 물품)</span>
-            </div>
-            <button class="organization-item-delete" onclick="deleteOrganization('${org}')">✕ 삭제</button>
-        </div>
-    `).join('');
-}
-
-// 기관 삭제
-function deleteOrganization(orgName) {
-    if (!confirm(`"${orgName}" 기관을 삭제하시겠습니까?\n\n※ 주의: 이미 등록된 물품의 기관명은 삭제되지 않습니다.`)) {
-        return;
-    }
-    
-    organizations = organizations.filter(org => org !== orgName);
-    saveOrganizations();
-    updateOrganizationSelect();
-    updateOrganizationList();
-    
-    if (currentOrganization === orgName) {
-        clearOrganization();
-    }
-    
-    showToast(`"${orgName}" 기관이 삭제되었습니다`, 'success');
+    return source || items;
 }
 
 // 다크 모드 초기화
@@ -566,6 +407,9 @@ function switchTab(tabName) {
     
     if (tabName === 'dashboard') {
         updateDashboard();
+        if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
+    } else if (tabName === 'register') {
+        if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
     } else if (tabName === 'list') {
         // 🔥 핵심: loadItems()가 알아서 중복 체크함
         loadItems(); // 내부에서 이미 등록되어 있으면 데이터만 표시 (읽기 0회)
@@ -605,6 +449,18 @@ function initEventListeners() {
             }
         });
     });
+    const offlineStatusBtn = document.getElementById('offlineStatus');
+    if (offlineStatusBtn) {
+        offlineStatusBtn.addEventListener('click', async () => {
+            if (typeof syncOfflineQueue !== 'function') return;
+            const result = await syncOfflineQueue();
+            if (result.synced) showToast(`대기 ${result.synced}건을 업로드했습니다`, 'success');
+            else if (result.failed) showToast('일부 대기 항목 업로드에 실패했습니다', 'error');
+            else if (typeof navigator !== 'undefined' && navigator.onLine === false) showToast('아직 오프라인입니다', 'info');
+            else showToast('업로드할 대기 항목이 없습니다', 'success');
+        });
+    }
+
     document.getElementById('resetBtn').addEventListener('click', () => {
         if (continuousMode) {
             resetFormKeepCommon();
@@ -638,6 +494,15 @@ function initEventListeners() {
     // 검색 및 필터
     searchInput.addEventListener('input', filterItems);
     filterCategory.addEventListener('change', filterItems);
+    const filterOrganization = document.getElementById('filterOrganization');
+    const filterCondition = document.getElementById('filterCondition');
+    if (filterOrganization) filterOrganization.addEventListener('change', filterItems);
+    if (filterCondition) filterCondition.addEventListener('change', filterItems);
+    ['filterSurveyor', 'filterLocation', 'filterDateFrom', 'filterDateTo'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', filterItems);
+    });
     sortBy.addEventListener('change', (e) => {
         currentSort = e.target.value;
         filterItems();
@@ -758,15 +623,19 @@ async function loadItemsForUser(retryCount = 0) {
         });
         
         items = Array.from(itemsMap.values());
+        if (typeof mergeOfflineQueueIntoItems === 'function') {
+            await mergeOfflineQueueIntoItems();
+        }
         
         console.log(`✅ 이중 쿼리 완료: 총 ${items.length}개 항목 (쿼리1: ${snapshot1.docs.length}개, 쿼리2: ${snapshot2.docs.length}개, 중복제거 후: ${items.length}개)`);
         console.log(`📊 총 읽기 횟수: ${totalReads}회`);
         
         // 정렬 적용
-        const sortedItems = sortItems(items, currentSort);
+        const sortedItems = sortItems(getItemsForView(), currentSort);
         displayItems(sortedItems);
         updateItemCount();
         updateDashboard();
+        if (typeof updateSurveySelect === 'function') updateSurveySelect();
         
         if (listLoading) listLoading.style.display = 'none';
         
@@ -787,7 +656,18 @@ async function loadItemsForUser(retryCount = 0) {
             }
         } else if (error.code === 'permission-denied') {
             errorMessage = '권한이 없습니다. 관리자에게 문의하세요.';
-        } else if (error.code === 'unavailable') {
+        } else if (error.code === 'unavailable' || (typeof isOfflineError === 'function' && isOfflineError(error))) {
+            if (typeof mergeOfflineQueueIntoItems === 'function') {
+                await mergeOfflineQueueIntoItems();
+            }
+            if (items.length) {
+                const sortedItems = sortItems(getItemsForView(), currentSort);
+                displayItems(sortedItems);
+                updateItemCount();
+                updateDashboard();
+                showToast('오프라인입니다. 저장된 목록과 대기 입력을 보여줍니다', 'info');
+                return;
+            }
             errorMessage = '네트워크 연결을 확인해주세요.';
         }
         
@@ -846,10 +726,10 @@ function setupUserRealtimeListener() {
             console.log(`🔄 변경사항: ➕${addedCount} ✏️${modifiedCount} 🗑️${removedCount} (읽기 ${changeReads}회)`);
             
             // 화면 업데이트
-            if (searchInput && (searchInput.value || filterCategory.value)) {
+            if (searchInput && (searchInput.value || filterCategory.value || document.getElementById('filterOrganization')?.value || document.getElementById('filterCondition')?.value)) {
                 filterItems();
             } else {
-                const sortedItems = sortItems(items, currentSort);
+                const sortedItems = sortItems(getItemsForView(), currentSort);
                 displayItems(sortedItems);
             }
             updateItemCount();
@@ -872,7 +752,7 @@ function loadItems() {
         console.log('✅ 리스너가 이미 등록되어 있음 (읽기 0회)');
         // 데이터만 다시 표시 (정렬 적용)
         if (items.length > 0) {
-            const sortedItems = sortItems(items, currentSort);
+            const sortedItems = sortItems(getItemsForView(), currentSort);
             displayItems(sortedItems);
             updateItemCount();
         }
@@ -919,6 +799,48 @@ function loadItems() {
     }
 }
 
+async function loadAllAdminItems() {
+    if (adminFullLoadDone) return;
+    if (adminFullLoadPromise) return adminFullLoadPromise;
+    if (typeof db === 'undefined' || !currentUser) return;
+
+    adminFullLoadPromise = (async () => {
+        try {
+            let cursor = null;
+            const seen = new Set(items.map((item) => item.id));
+            while (true) {
+                let query = db.collection('items').orderBy('timestamp', 'desc').limit(ADMIN_FETCH_BATCH);
+                if (cursor) query = query.startAfter(cursor);
+                const snapshot = await query.get();
+                if (snapshot.empty) break;
+                snapshot.forEach((doc) => {
+                    if (seen.has(doc.id)) return;
+                    seen.add(doc.id);
+                    items.push({ id: doc.id, ...doc.data() });
+                });
+                totalReads += snapshot.docs.length;
+                cursor = snapshot.docs[snapshot.docs.length - 1];
+                if (snapshot.docs.length < ADMIN_FETCH_BATCH) break;
+            }
+            adminFullLoadDone = true;
+            if (typeof mergeOfflineQueueIntoItems === 'function') {
+                await mergeOfflineQueueIntoItems();
+            }
+            if (typeof updateFilterOrganization === 'function') updateFilterOrganization();
+            if (typeof refreshVisibleViews === 'function') refreshVisibleViews();
+            else {
+                filterItems();
+                updateDashboard();
+            }
+            console.log(`📥 관리자 전체 로드 완료: ${items.length}개`);
+        } catch (error) {
+            console.warn('전체 물품 추가 로드 실패, 현재 목록으로 집계합니다:', error);
+            adminFullLoadPromise = null;
+        }
+    })();
+    return adminFullLoadPromise;
+}
+
 // 관리자용 실시간 리스너 설정 (기존 로직)
 function setupAdminRealtimeListener(query) {
     const listLoading = document.getElementById('listLoading');
@@ -954,11 +876,8 @@ function setupAdminRealtimeListener(query) {
                 }
                 console.log(`📊 총 읽기 횟수: ${totalReads}회 (세션 시작 후 ${Math.floor((Date.now() - sessionStart) / 1000)}초)`);
                 
-                // 관리자 페이지네이션: 마지막 문서 저장
-                if (currentUserRole === 'admin' && snapshot.docs.length > 0) {
-                    lastVisible = snapshot.docs[snapshot.docs.length - 1];
-                    hasMorePages = snapshot.docs.length === ADMIN_PAGE_SIZE;
-                    updatePaginationUI();
+                if (currentUserRole === 'admin') {
+                    loadAllAdminItems();
                 }
             } else {
                 // 🔥 핵심 최적화: 변경된 문서만 처리 (읽기 최소화!)
@@ -1021,13 +940,13 @@ function setupAdminRealtimeListener(query) {
             
             // 🔥 검색 상태 유지: 검색어가 있으면 필터링 적용
             console.log(`🖼️ 화면 업데이트 시작... (items: ${items.length}개)`);
-            if (searchInput && (searchInput.value || filterCategory.value)) {
+            if (searchInput && (searchInput.value || filterCategory.value || document.getElementById('filterOrganization')?.value || document.getElementById('filterCondition')?.value)) {
                 console.log(`🔍 검색 필터 적용 중...`);
                 filterItems(); // 검색 필터 유지
             } else {
                 console.log(`📋 전체 목록 표시 중... (정렬: ${currentSort})`);
                 // 🔥 정렬 적용: 최신순으로 표시
-                const sortedItems = sortItems(items, currentSort);
+                const sortedItems = sortItems(getItemsForView(), currentSort);
                 displayItems(sortedItems);
             }
             updateItemCount();
@@ -1073,10 +992,13 @@ function setupAdminRealtimeListener(query) {
 
 // 물품 목록 표시
 function displayItems(itemsToShow) {
+    const listEl = document.getElementById('itemList') || itemList;
+    if (!listEl) return;
+
     // 🔥 중요: currentUser 확인
     if (!currentUser) {
         console.error('⚠️ displayItems 호출 시 currentUser가 없습니다!');
-        itemList.innerHTML = `
+        listEl.innerHTML = `
             <div class="empty-state">
                 <div class="empty-state-icon">⚠️</div>
                 <div class="empty-state-text">사용자 정보를 불러오는 중...</div>
@@ -1088,7 +1010,7 @@ function displayItems(itemsToShow) {
     console.log(`📋 물품 목록 표시: ${itemsToShow.length}개 | 현재 사용자: ${currentUser.uid} | 역할: ${currentUserRole}`);
     
     if (itemsToShow.length === 0) {
-        itemList.innerHTML = `
+        listEl.innerHTML = `
             <div class="empty-state">
                 <div class="empty-state-icon">📦</div>
                 <div class="empty-state-text">조사된 물품이 없습니다</div>
@@ -1097,7 +1019,7 @@ function displayItems(itemsToShow) {
         return;
     }
     
-    itemList.innerHTML = itemsToShow.map(item => {
+    listEl.innerHTML = itemsToShow.map(item => {
         // 권한 체크: 관리자이거나 본인이 작성한 물품만 수정 가능
         const isOwner = currentUser && item.userId && item.userId === currentUser.uid;
         // userId가 없는 기존 물품은 모든 사용자가 수정 가능 (하위 호환성)
@@ -1135,7 +1057,7 @@ function displayItems(itemsToShow) {
         return `
         <div class="item-card" data-id="${item.id}">
             <div class="item-header">
-                <div class="item-title">${item.itemName || '미지정'}</div>
+                <div class="item-title">${item.itemName || '미지정'}${item._pending ? '<span class="pending-badge">대기</span>' : ''}</div>
                 ${item.category ? `<span class="item-category">${item.category}</span>` : ''}
             </div>
             
@@ -1143,6 +1065,11 @@ function displayItems(itemsToShow) {
                 <div class="info-item">
                     <span class="info-label">조사자:</span> ${item.surveyor || '-'}
                 </div>
+                ${item.surveyName ? `
+                    <div class="info-item">
+                        <span class="info-label">조사 회차:</span> ${item.surveyName}
+                    </div>
+                ` : ''}
                 ${item.organization ? `
                     <div class="info-item">
                         <span class="info-label">기관명:</span> ${item.organization}
@@ -1245,13 +1172,22 @@ function displayItems(itemsToShow) {
 
 // 물품 수 업데이트
 function updateItemCount() {
-    const count = totalItemCount > 0 ? totalItemCount : items.length;
-    
-    // 관리자가 페이지네이션 사용 중이고 더 많은 페이지가 있으면 "이상" 표시
-    if (currentUserRole === 'admin' && hasMorePages && currentPage > 1) {
-        itemCount.textContent = `총 ${count}개 이상 물품`;
+    const visibleCount = getItemsForView().length;
+    const filteredCount = lastFilteredItems.length || visibleCount;
+    const survey = typeof getCurrentSurvey === 'function' ? getCurrentSurvey() : null;
+    let prefix = '전체';
+    if (typeof currentSurveyId !== 'undefined') {
+        if (currentSurveyId === '__unassigned__') prefix = '미분류';
+        else if (survey?.name) prefix = survey.name;
+        else if (currentSurveyId && currentSurveyId !== '__all__') prefix = '선택한 회차';
+    }
+
+    if (filteredCount !== visibleCount) {
+        itemCount.textContent = `${prefix} ${filteredCount}개 검색 / 전체 ${visibleCount}개`;
+    } else if (currentUserRole === 'admin' && !adminFullLoadDone) {
+        itemCount.textContent = `${prefix} ${visibleCount}개 물품 (불러오는 중)`;
     } else {
-        itemCount.textContent = `총 ${count}개 물품`;
+        itemCount.textContent = `${prefix} ${visibleCount}개 물품`;
     }
 }
 
@@ -1374,6 +1310,10 @@ function resetFormKeepCommon() {
             commonValues[field] = value;
         }
     });
+    ['building', 'floor', 'room', 'organization', 'surveyor', 'quantity'].forEach(field => {
+        const value = document.getElementById(field)?.value;
+        if (value) commonValues[field] = value;
+    });
     
     // 폼 초기화
     itemForm.reset();
@@ -1385,6 +1325,12 @@ function resetFormKeepCommon() {
             input.value = commonValues[field];
         }
     });
+    if (commonValues.organization && typeof selectOrganization === 'function') {
+        const orgSelect = document.getElementById('organizationSelect');
+        if (orgSelect) orgSelect.value = commonValues.organization;
+        currentOrganization = commonValues.organization;
+    }
+    if (typeof updateLocationPreview === 'function') updateLocationPreview();
     
     // 갯수가 복원되지 않았으면 기본값 1 설정
     if (!commonValues['quantity']) {
@@ -1393,6 +1339,22 @@ function resetFormKeepCommon() {
     
     // 물품명 포커스
     document.getElementById('itemName').focus();
+}
+
+function resetFormAfterAdd() {
+    if (continuousMode) {
+        resetFormKeepCommon();
+        return;
+    }
+    itemForm.reset();
+    document.getElementById('surveyor').value = currentUser.displayName || '';
+    document.getElementById('quantity').value = '1';
+    if (currentOrganization && typeof selectOrganization === 'function') {
+        const orgSelect = document.getElementById('organizationSelect');
+        if (orgSelect) orgSelect.value = currentOrganization;
+        document.getElementById('organization').value = currentOrganization;
+    }
+    if (typeof updateLocationPreview === 'function') updateLocationPreview();
 }
 
 // 물품 추가
@@ -1414,6 +1376,11 @@ async function handleAddItem(e) {
         showToast('물품명과 조사자 이름은 필수 항목입니다', 'error');
         return false;
     }
+
+    if (typeof confirmAssetDuplicate === 'function') {
+        const allowed = await confirmAssetDuplicate();
+        if (!allowed) return false;
+    }
     
     isSubmitting = true;
     
@@ -1425,15 +1392,67 @@ async function handleAddItem(e) {
         submitBtn.textContent = '저장 중...';
     }
     
+    const writableSurvey = typeof getWritableSurvey === 'function' ? getWritableSurvey() : null;
+    if (!writableSurvey) {
+        isSubmitting = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalBtnText;
+        }
+        showToast('진행 중인 조사 회차가 없습니다. 회차를 먼저 선택하거나 만들어 주세요.', 'error');
+        return false;
+    }
+
     const formData = new FormData(itemForm);
     const data = {};
     formData.forEach((value, key) => {
         if (value) data[key] = value;
     });
+    if (typeof applyItemLocationFields === 'function') {
+        applyItemLocationFields(data);
+    }
+    if (typeof upsertLocationFromItem === 'function') {
+        try {
+            data.location = await upsertLocationFromItem(data) || data.location;
+        } catch (error) {
+            console.warn('위치 마스터 저장 건너뜀:', error);
+            data.location = data.location || [data.building, data.floor, data.room].filter(Boolean).join(' ');
+        }
+    }
     
     // 사용자 정보 추가
     data.userId = currentUser.uid;
     data.userEmail = currentUser.email;
+    if (writableSurvey && !writableSurvey.isFallback && writableSurvey.id) {
+        data.surveyId = writableSurvey.id;
+        data.surveyName = writableSurvey.name;
+    }
+    const persistOffline = async () => {
+        const offlineData = {
+            ...data,
+            timestamp: new Date().toISOString()
+        };
+        await saveItemOffline(offlineData);
+        showToast(`오프라인 저장: "${data.itemName || '물품'}". 연결되면 자동 업로드합니다`, 'success');
+        resetFormAfterAdd();
+    };
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false && typeof saveItemOffline === 'function') {
+        try {
+            await persistOffline();
+        } catch (error) {
+            console.error('오프라인 저장 실패:', error);
+            showToast('오프라인 저장에 실패했습니다', 'error');
+        } finally {
+            isSubmitting = false;
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalBtnText;
+            }
+        }
+        return false;
+    }
+
     data.timestamp = firebase.firestore.FieldValue.serverTimestamp();
     
     // 🔍 디버깅: 등록할 데이터 확인
@@ -1447,6 +1466,10 @@ async function handleAddItem(e) {
     
     try {
         const docRef = await db.collection('items').add(data);
+        if (typeof markRegisterFound === 'function' && data.assetNumber) {
+            await markRegisterFound(data.assetNumber, docRef.id, { condition: data.condition });
+        }
+        if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
         console.log('✅ 물품 등록 완료! 문서ID:', docRef.id);
         console.log('⏳ 실시간 리스너가 곧 이 변경사항을 감지합니다...');
         console.log('   리스너 등록 상태:', isListenerRegistered ? '✅ 등록됨' : '❌ 미등록');
@@ -1463,18 +1486,19 @@ async function handleAddItem(e) {
             });
         }
         
-        if (continuousMode) {
-            // 연속 등록 모드: 공통 항목 유지
-            resetFormKeepCommon();
-        } else {
-            // 일반 모드: 전체 초기화
-            itemForm.reset();
-            document.getElementById('surveyor').value = currentUser.displayName || '';
-            document.getElementById('quantity').value = '1'; // 갯수 기본값 1
-        }
+        resetFormAfterAdd();
     } catch (error) {
         console.error('등록 오류:', error);
-        showToast('등록 중 오류가 발생했습니다', 'error');
+        if (typeof isOfflineError === 'function' && isOfflineError(error) && typeof saveItemOffline === 'function') {
+            try {
+                await persistOffline();
+            } catch (offlineError) {
+                console.error('오프라인 저장 실패:', offlineError);
+                showToast('등록 중 오류가 발생했습니다', 'error');
+            }
+        } else {
+            showToast('등록 중 오류가 발생했습니다', 'error');
+        }
     } finally {
         // 🔒 제출 플래그 해제 및 버튼 복원
         isSubmitting = false;
@@ -1517,6 +1541,9 @@ function openEditModal(id) {
     document.getElementById('editId').value = item.id;
     document.getElementById('editSurveyor').value = item.surveyor || '';
     document.getElementById('editOrganization').value = item.organization || '';
+    document.getElementById('editBuilding').value = item.building || '';
+    document.getElementById('editFloor').value = item.floor || '';
+    document.getElementById('editRoom').value = item.room || '';
     document.getElementById('editLocation').value = item.location || '';
     document.getElementById('editItemName').value = item.itemName || '';
     document.getElementById('editAssetNumber').value = item.assetNumber || '';
@@ -1587,6 +1614,39 @@ async function handleEditItem(e) {
     formData.forEach((value, key) => {
         if (value) data[key] = value;
     });
+    if (typeof applyItemLocationFields === 'function') {
+        applyItemLocationFields(data);
+    }
+    if (typeof upsertLocationFromItem === 'function') {
+        try {
+            data.location = await upsertLocationFromItem(data) || data.location;
+        } catch (error) {
+            console.warn('위치 마스터 저장 건너뜀:', error);
+        }
+    }
+
+    const saveEditOffline = async () => {
+        await updateItemOffline(currentEditId, data);
+        showToast('오프라인에서 수정했습니다. 연결되면 반영됩니다', 'success');
+        closeEditModal();
+    };
+
+    if ((typeof isLocalItemId === 'function' && isLocalItemId(currentEditId))
+        || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
+        try {
+            await saveEditOffline();
+        } catch (error) {
+            console.error('오프라인 수정 실패:', error);
+            showToast('수정 중 오류가 발생했습니다', 'error');
+        } finally {
+            isSubmitting = false;
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalBtnText;
+            }
+        }
+        return false;
+    }
     
     data.updatedAt = firebase.firestore.FieldValue.serverTimestamp();
     
@@ -1596,7 +1656,16 @@ async function handleEditItem(e) {
         closeEditModal();
     } catch (error) {
         console.error('수정 오류:', error);
-        showToast('수정 중 오류가 발생했습니다', 'error');
+        if (typeof isOfflineError === 'function' && isOfflineError(error) && typeof updateItemOffline === 'function') {
+            try {
+                await saveEditOffline();
+            } catch (offlineError) {
+                console.error('오프라인 수정 실패:', offlineError);
+                showToast('수정 중 오류가 발생했습니다', 'error');
+            }
+        } else {
+            showToast('수정 중 오류가 발생했습니다', 'error');
+        }
     } finally {
         // 🔒 제출 플래그 해제 및 버튼 복원
         isSubmitting = false;
@@ -1614,45 +1683,79 @@ async function deleteItem(id) {
     const item = items.find(i => i.id === id);
     if (!item) return;
     
-    // 권한 확인 - 관리자만 삭제 가능
-    if (currentUserRole !== 'admin') {
+    const isLocalPending = typeof isLocalItemId === 'function' && isLocalItemId(id);
+    const isOwner = currentUser && item.userId && item.userId === currentUser.uid;
+    if (currentUserRole !== 'admin' && !isLocalPending) {
         showToast('관리자만 삭제할 수 있습니다', 'error');
+        return;
+    }
+    if (isLocalPending && currentUserRole !== 'admin' && !isOwner && item.userId) {
+        showToast('본인이 저장한 대기 항목만 삭제할 수 있습니다', 'error');
         return;
     }
     
     if (!confirm('정말 삭제하시겠습니까?')) return;
     
+    if (isLocalPending && typeof deleteItemOffline === 'function') {
+        await deleteItemOffline(id);
+        showToast('대기 중이던 항목을 삭제했습니다', 'success');
+        return;
+    }
+
     try {
         await db.collection('items').doc(id).delete();
         showToast('물품이 삭제되었습니다', 'success');
     } catch (error) {
         console.error('삭제 오류:', error);
-        showToast('삭제 중 오류가 발생했습니다', 'error');
+        if (typeof isOfflineError === 'function' && isOfflineError(error) && typeof deleteItemOffline === 'function') {
+            await deleteItemOffline(id);
+            showToast('오프라인에서 삭제했습니다. 연결되면 반영됩니다', 'success');
+        } else {
+            showToast('삭제 중 오류가 발생했습니다', 'error');
+        }
     }
 }
 
-// 검색 및 필터
-function filterItems() {
-    const searchTerm = searchInput.value.toLowerCase();
-    const category = filterCategory.value;
-    
-    let filtered = items.filter(item => {
-        const matchesSearch = !searchTerm || 
-            (item.itemName && item.itemName.toLowerCase().includes(searchTerm)) ||
-            (item.surveyor && item.surveyor.toLowerCase().includes(searchTerm)) ||
-            (item.manufacturer && item.manufacturer.toLowerCase().includes(searchTerm)) ||
-            (item.model && item.model.toLowerCase().includes(searchTerm)) ||
-            (item.notes && item.notes.toLowerCase().includes(searchTerm));
-        
+function applyItemFilters(source) {
+    const searchTerm = (searchInput?.value || '').toLowerCase();
+    const category = filterCategory?.value || '';
+    const organization = document.getElementById('filterOrganization')?.value || '';
+    const condition = document.getElementById('filterCondition')?.value || '';
+    const surveyor = document.getElementById('filterSurveyor')?.value || '';
+    const locationTerm = (document.getElementById('filterLocation')?.value || '').toLowerCase().trim();
+    const dateFrom = document.getElementById('filterDateFrom')?.value || '';
+    const dateTo = document.getElementById('filterDateTo')?.value || '';
+
+    return (source || getItemsForView()).filter((item) => {
+        const haystack = [
+            item.itemName, item.surveyor, item.manufacturer, item.model, item.notes,
+            item.organization, item.location, item.assetNumber, item.building,
+            item.floor, item.room, item.surveyName
+        ].map((value) => String(value || '').toLowerCase()).join(' ');
+        const matchesSearch = !searchTerm || haystack.includes(searchTerm);
         const matchesCategory = !category || item.category === category;
-        
-        return matchesSearch && matchesCategory;
+        const matchesOrganization = !organization || item.organization === organization;
+        const matchesCondition = !condition || item.condition === condition;
+        const matchesSurveyor = !surveyor || item.surveyor === surveyor;
+        const locationText = [item.location, item.building, item.floor, item.room].filter(Boolean).join(' ').toLowerCase();
+        const matchesLocation = !locationTerm || locationText.includes(locationTerm);
+        const itemDate = typeof getSafeDate === 'function' ? getSafeDate(item.timestamp) : new Date(item.timestamp || 0);
+        const matchesFrom = !dateFrom || itemDate >= new Date(`${dateFrom}T00:00:00`);
+        const matchesTo = !dateTo || itemDate <= new Date(`${dateTo}T23:59:59`);
+        return matchesSearch && matchesCategory && matchesOrganization && matchesCondition
+            && matchesSurveyor && matchesLocation && matchesFrom && matchesTo;
     });
-    
-    // 정렬 적용
-    filtered = sortItems(filtered, currentSort);
-    
-    displayItems(filtered);
+}
+
+function filterItems(keepPage) {
+    if (keepPage !== true) listPage = 1;
+    lastFilteredItems = sortItems(applyItemFilters(getItemsForView()), currentSort);
+    const totalPages = Math.max(1, Math.ceil(lastFilteredItems.length / ADMIN_PAGE_SIZE) || 1);
+    if (listPage > totalPages) listPage = totalPages;
+    const start = (listPage - 1) * ADMIN_PAGE_SIZE;
+    displayItems(lastFilteredItems.slice(start, start + ADMIN_PAGE_SIZE));
+    updateItemCount();
+    updateListPagination();
 }
 
 // 정렬 함수
@@ -1727,17 +1830,22 @@ function sortItems(itemsToSort, sortType) {
 
 // 엑셀 다운로드 - 현재 페이지 (클라이언트 사이드)
 function exportExcel() {
-    if (items.length === 0) {
+    const exportItems = getItemsForView();
+    if (exportItems.length === 0) {
         showToast('다운로드할 데이터가 없습니다', 'error');
         return;
     }
     
     try {
-        const worksheetData = items.map(item => {
-            const timestamp = item.timestamp ? item.timestamp.toDate() : new Date();
+        const worksheetData = exportItems.map(item => {
+            const timestamp = typeof getSafeDate === 'function' ? getSafeDate(item.timestamp) : (item.timestamp?.toDate?.() || new Date());
             return {
+                '조사회차': item.surveyName || '',
                 '조사자': item.surveyor || '',
                 '기관명': item.organization || '',
+                '건물': item.building || '',
+                '층': item.floor || '',
+                '실/호': item.room || '',
                 '사용위치': item.location || '',
                 '물품명': item.itemName || '',
                 '자산번호': item.assetNumber || '',
@@ -1769,7 +1877,8 @@ function exportExcel() {
             { wch: 18 }, { wch: 20 }
         ];
         
-        XLSX.writeFile(workbook, `물품조사_현재페이지_${new Date().toISOString().split('T')[0]}.xlsx`);
+        const surveyLabel = (typeof getCurrentSurvey === 'function' && getCurrentSurvey()?.name) || '선택회차';
+        XLSX.writeFile(workbook, `물품조사_${surveyLabel}_${new Date().toISOString().split('T')[0]}.xlsx`);
         showToast('엑셀 파일이 다운로드되었습니다', 'success');
     } catch (error) {
         console.error('다운로드 오류:', error);
@@ -1848,8 +1957,13 @@ async function exportExcelAll() {
                 const data = doc.data();
                 return {
                     id: doc.id,
+                    surveyId: data.surveyId,
+                    surveyName: data.surveyName,
                     surveyor: data.surveyor,
                     organization: data.organization,
+                    building: data.building,
+                    floor: data.floor,
+                    room: data.room,
                     location: data.location,
                     itemName: data.itemName,
                     assetNumber: data.assetNumber,
@@ -1893,6 +2007,7 @@ async function exportExcelAll() {
         } while (lastDoc);
         
         console.log(`✅ 전체 데이터 로드 완료: ${allItems.length}건`);
+        const scopedItems = typeof getVisibleItems === 'function' ? getVisibleItems(allItems) : allItems;
         
         // 프로그레스 메시지 업데이트
         progressMessage.textContent = '엑셀 파일 생성 중...';
@@ -1900,11 +2015,15 @@ async function exportExcelAll() {
         progressPercent.textContent = '90%';
         
         // 엑셀 데이터 생성
-        const worksheetData = allItems.map(item => {
-            const timestamp = item.timestamp ? item.timestamp.toDate() : new Date();
+        const worksheetData = scopedItems.map(item => {
+            const timestamp = typeof getSafeDate === 'function' ? getSafeDate(item.timestamp) : (item.timestamp?.toDate?.() || new Date());
             return {
+                '조사회차': item.surveyName || '',
                 '조사자': item.surveyor || '',
                 '기관명': item.organization || '',
+                '건물': item.building || '',
+                '층': item.floor || '',
+                '실/호': item.room || '',
                 '사용위치': item.location || '',
                 '물품명': item.itemName || '',
                 '자산번호': item.assetNumber || '',
@@ -1942,14 +2061,14 @@ async function exportExcelAll() {
         progressPercent.textContent = '100%';
         progressMessage.textContent = '다운로드 중...';
         
-        XLSX.writeFile(workbook, `물품조사_전체_${allItems.length}건_${new Date().toISOString().split('T')[0]}.xlsx`);
+        XLSX.writeFile(workbook, `물품조사_전체_${scopedItems.length}건_${new Date().toISOString().split('T')[0]}.xlsx`);
         
         // 프로그레스 모달 닫기
         setTimeout(() => {
             progressModal.style.display = 'none';
         }, 500);
         
-        showToast(`전체 데이터 ${allItems.length.toLocaleString()}건이 다운로드되었습니다`, 'success');
+        showToast(`전체 데이터 ${scopedItems.length.toLocaleString()}건이 다운로드되었습니다`, 'success');
         console.log('✅ 엑셀 다운로드 완료');
         
     } catch (error) {
@@ -1979,13 +2098,14 @@ async function exportExcelAll() {
 
 // JSON 다운로드
 function exportJson() {
-    if (items.length === 0) {
+    const exportItems = getItemsForView();
+    if (exportItems.length === 0) {
         showToast('다운로드할 데이터가 없습니다', 'error');
         return;
     }
     
     try {
-        const exportData = items.map(item => {
+        const exportData = exportItems.map(item => {
             const timestamp = item.timestamp ? item.timestamp.toDate().toISOString() : new Date().toISOString();
             return { ...item, timestamp };
         });
@@ -2031,8 +2151,12 @@ async function handleImport(e) {
             const jsonData = XLSX.utils.sheet_to_json(worksheet);
             
             importedItems = jsonData.map(row => ({
+                surveyName: row['조사회차'] || '',
                 surveyor: row['조사자'] || '',
                 organization: row['기관명'] || '',
+                building: row['건물'] || '',
+                floor: row['층'] || '',
+                room: row['실/호'] || '',
                 location: row['사용위치'] || '',
                 itemName: row['물품명'] || '',
                 assetNumber: row['자산번호'] || '',
@@ -2056,13 +2180,19 @@ async function handleImport(e) {
         // Firestore에 일괄 추가
         const batch = db.batch();
         let count = 0;
+        const writableSurvey = typeof getWritableSurvey === 'function' ? getWritableSurvey() : null;
         
         for (const item of importedItems) {
             const docRef = db.collection('items').doc();
+            if (typeof applyItemLocationFields === 'function') {
+                applyItemLocationFields(item);
+            }
             batch.set(docRef, {
                 ...item,
                 userId: currentUser.uid,
                 userEmail: currentUser.email,
+                surveyId: item.surveyId || writableSurvey?.id || '',
+                surveyName: item.surveyName || writableSurvey?.name || '',
                 timestamp: firebase.firestore.FieldValue.serverTimestamp(),
                 imported: true
             });
@@ -2143,45 +2273,84 @@ function updateDashboard() {
     dashboardContent.style.display = 'none';
     
     setTimeout(() => {
-        // 통계 계산 - 전체 개수가 있으면 사용, 없으면 현재 items 사용
-        const totalItems = totalItemCount > 0 ? totalItemCount : items.length;
-        const goodCondition = items.filter(item => 
+        const viewItems = getItemsForView();
+        const totalItems = viewItems.length;
+        const goodCondition = viewItems.filter(item => 
             item.condition === '매우 좋음' || item.condition === '좋음'
         ).length;
-        const needsAttention = items.filter(item => 
+        const needsAttention = viewItems.filter(item => 
             item.condition === '나쁨' || item.condition === '매우 나쁨'
         ).length;
         
-        // 최근 7일 데이터
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const recentItems = items.filter(item => {
-            const itemDate = item.timestamp ? item.timestamp.toDate() : new Date(0);
+        const recentItems = viewItems.filter(item => {
+            const itemDate = typeof getSafeDate === 'function' ? getSafeDate(item.timestamp) : (item.timestamp?.toDate?.() || new Date(0));
             return itemDate >= sevenDaysAgo;
         }).length;
         
-        // 통계 업데이트
         document.getElementById('totalItems').textContent = totalItems;
         document.getElementById('goodCondition').textContent = goodCondition;
         document.getElementById('needsAttention').textContent = needsAttention;
         document.getElementById('recentItems').textContent = recentItems;
+        updateDashboardScope(viewItems.length);
         
-        // 카테고리별 분포
         updateCategoryChart();
-        
-        // 최근 물품 목록
+        updateNamedBreakdown('surveyorChart', viewItems, (item) => item.surveyor || '미지정');
+        updateNamedBreakdown('locationChart', viewItems, (item) => item.location || composeLocation?.(item.building, item.floor, item.room, '') || '위치 없음');
         updateRecentItemsList();
+        if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
         
-        // 로딩 숨기기
         dashboardLoading.style.display = 'none';
         dashboardContent.style.display = 'block';
-    }, 500);
+    }, 120);
+}
+
+function updateDashboardScope(count) {
+    const el = document.getElementById('dashboardScope');
+    if (!el) return;
+    const survey = typeof getCurrentSurvey === 'function' ? getCurrentSurvey() : null;
+    let label = '전체 회차';
+    if (typeof currentSurveyId !== 'undefined') {
+        if (currentSurveyId === '__unassigned__') label = '미분류';
+        else if (survey?.name) label = survey.name;
+        else if (currentSurveyId && currentSurveyId !== '__all__') label = '선택한 회차';
+    }
+    const loading = currentUserRole === 'admin' && !adminFullLoadDone ? ' · 나머지 데이터를 불러오는 중' : '';
+    el.textContent = `${label} ${count}건 기준${loading}`;
+}
+
+function updateNamedBreakdown(elementId, source, pickName) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    const counts = {};
+    source.forEach((item) => {
+        const name = String(pickName(item) || '').trim() || '미지정';
+        counts[name] = (counts[name] || 0) + 1;
+    });
+    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 12);
+    if (!entries.length) {
+        el.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">데이터가 없습니다</p>';
+        return;
+    }
+    const maxCount = Math.max(...entries.map((entry) => entry[1]), 1);
+    el.innerHTML = entries.map(([name, count]) => {
+        const percentage = (count / maxCount) * 100;
+        return `
+            <div class="category-bar">
+                <div class="category-name">${typeof escapeHtml === 'function' ? escapeHtml(name) : name}</div>
+                <div class="category-bar-container">
+                    <div class="category-bar-fill" style="width: ${percentage}%">${count}개</div>
+                </div>
+            </div>
+        `;
+    }).join('');
 }
 
 // 카테고리별 차트 업데이트
 function updateCategoryChart() {
     const categoryCount = {};
-    items.forEach(item => {
+    getItemsForView().forEach(item => {
         const cat = item.category || '미분류';
         categoryCount[cat] = (categoryCount[cat] || 0) + 1;
     });
@@ -2214,7 +2383,7 @@ function updateCategoryChart() {
 // 최근 물품 목록 업데이트
 function updateRecentItemsList() {
     const recentItemsList = document.getElementById('recentItemsList');
-    const recentItems = items.slice(0, 5);
+    const recentItems = sortItems(getItemsForView(), 'newest').slice(0, 5);
     
     if (recentItems.length === 0) {
         recentItemsList.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">최근 추가된 물품이 없습니다</p>';
@@ -2222,7 +2391,7 @@ function updateRecentItemsList() {
     }
     
     recentItemsList.innerHTML = recentItems.map(item => {
-        const timestamp = item.timestamp ? item.timestamp.toDate() : new Date();
+        const timestamp = typeof getSafeDate === 'function' ? getSafeDate(item.timestamp) : (item.timestamp?.toDate?.() || new Date());
         const timeAgo = getTimeAgo(timestamp);
         
         return `
@@ -2494,104 +2663,43 @@ async function migrateUserIds() {
 // 📄 페이지네이션 함수 (관리자 전용)
 // ===============================================
 
-// 다음 페이지 로드
-async function loadNextPage() {
-    if (!lastVisible || !hasMorePages) {
+function updateListPagination() {
+    const total = lastFilteredItems.length;
+    const totalPages = Math.max(1, Math.ceil(total / ADMIN_PAGE_SIZE) || 1);
+    hasMorePages = listPage < totalPages;
+    currentPage = listPage;
+    const paginationDiv = document.getElementById('paginationControls');
+    if (paginationDiv) {
+        paginationDiv.style.display = total > ADMIN_PAGE_SIZE ? 'flex' : 'none';
+    }
+    const pageInfo = document.getElementById('pageInfo');
+    if (pageInfo) {
+        pageInfo.textContent = `${listPage} / ${totalPages}페이지 · ${total}건`;
+    }
+    const nextBtn = document.getElementById('nextPageBtn');
+    const prevBtn = document.getElementById('prevPageBtn');
+    if (nextBtn) nextBtn.disabled = !hasMorePages;
+    if (prevBtn) prevBtn.disabled = listPage <= 1;
+}
+
+function loadNextPage() {
+    const totalPages = Math.max(1, Math.ceil(lastFilteredItems.length / ADMIN_PAGE_SIZE) || 1);
+    if (listPage >= totalPages) {
         showToast('마지막 페이지입니다', 'info');
         return;
     }
-    
-    console.log(`📄 다음 페이지(${currentPage + 1}) 로드 중...`);
-    
-    try {
-        const nextQuery = db.collection('items')
-            .orderBy('timestamp', 'desc')
-            .startAfter(lastVisible)
-            .limit(ADMIN_PAGE_SIZE);
-        
-        const snapshot = await nextQuery.get();
-        
-        if (snapshot.empty) {
-            showToast('더 이상 데이터가 없습니다', 'info');
-            hasMorePages = false;
-            updatePaginationUI();
-            return;
-        }
-        
-        // 데이터 교체 (이전 페이지 데이터는 제거)
-        items = [];
-        snapshot.forEach((doc) => {
-            items.push({
-                id: doc.id,
-                ...doc.data()
-            });
-        });
-        
-        lastVisible = snapshot.docs[snapshot.docs.length - 1];
-        hasMorePages = snapshot.docs.length === ADMIN_PAGE_SIZE;
-        currentPage++;
-        
-        // 정렬 적용 후 표시
-        const sortedItems = sortItems(items, currentSort);
-        displayItems(sortedItems);
-        updateItemCount();
-        updatePaginationUI();
-        
-        totalReads += snapshot.docs.length;
-        console.log(`📥 페이지 ${currentPage} 로드 완료: ${items.length}개 (총 읽기: ${totalReads}회)`);
-        
-        // 페이지 상단으로 스크롤
-        document.getElementById('listTab')?.scrollIntoView({ behavior: 'smooth' });
-        
-    } catch (error) {
-        console.error('다음 페이지 로드 오류:', error);
-        showToast('페이지 로드에 실패했습니다', 'error');
-    }
+    listPage += 1;
+    filterItems(true);
+    document.getElementById('list')?.scrollIntoView({ behavior: 'smooth' });
 }
 
-// 이전 페이지는 첫 페이지로 돌아가기
 function goToFirstPage() {
-    if (currentPage === 1) {
-        showToast('이미 첫 페이지입니다', 'info');
-        return;
-    }
-    
-    console.log('📄 첫 페이지로 이동');
-    
-    // 리스너 해제 후 재등록
-    if (unsubscribe) {
-        unsubscribe();
-    }
-    
-    // 상태 초기화
-    items = [];
-    currentPage = 1;
-    lastVisible = null;
-    hasMorePages = true;
-    isListenerRegistered = false;
-    initialLoadComplete = false;
-    
-    // 다시 로드
-    loadItems();
+    listPage = 1;
+    filterItems(true);
 }
 
-// 페이지네이션 UI 업데이트
 function updatePaginationUI() {
-    const prevBtn = document.getElementById('prevPageBtn');
-    const nextBtn = document.getElementById('nextPageBtn');
-    const pageInfo = document.getElementById('pageInfo');
-    
-    if (prevBtn) {
-        prevBtn.disabled = currentPage === 1;
-    }
-    
-    if (nextBtn) {
-        nextBtn.disabled = !hasMorePages;
-    }
-    
-    if (pageInfo) {
-        pageInfo.textContent = `페이지 ${currentPage}`;
-    }
+    updateListPagination();
 }
 
 // 페이지네이션 컨트롤 표시
@@ -2614,7 +2722,6 @@ function hidePaginationControls() {
 window.openEditModal = openEditModal;
 window.deleteItem = deleteItem;
 window.switchTab = switchTab;
-window.deleteOrganization = deleteOrganization;
 window.toggleUserRole = toggleUserRole;
 window.migrateUserIds = migrateUserIds;
 window.loadNextPage = loadNextPage;
