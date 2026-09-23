@@ -511,8 +511,37 @@
                     <button type="button" class="btn btn-secondary btn-small" data-register-filter="missing">미발견</button>
                     <button type="button" class="btn btn-secondary btn-small" data-register-filter="new">신규</button>
                 </div>
+                <div class="register-controls">
+                    <input type="text" id="registerSearch" placeholder="🔍 자산번호, 물품명, 위치, 분류, 확인자 검색">
+                    <select id="registerSort" title="정렬 기준">
+                        <option value="default">대장 순서</option>
+                        <option value="asset">자산번호순</option>
+                        <option value="name">물품명순</option>
+                        <option value="location">위치순</option>
+                        <option value="status">상태순</option>
+                    </select>
+                </div>
                 <p id="registerEmpty" class="register-empty">대장을 보려면 조사 회차를 선택하세요.</p>
-                <div id="registerList" class="organization-list"></div>
+                <div class="register-table-wrap" id="registerTableWrap">
+                    <table class="register-table">
+                        <thead>
+                            <tr>
+                                <th>상태</th>
+                                <th>자산번호</th>
+                                <th>물품명</th>
+                                <th>위치</th>
+                                <th class="col-optional">수량</th>
+                                <th class="col-optional">분류</th>
+                                <th class="col-optional">모델</th>
+                                <th class="col-optional">확인자</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody id="registerTableBody"></tbody>
+                    </table>
+                    <div id="registerSentinel" class="register-sentinel"></div>
+                </div>
+                <p id="registerCount" class="register-count"></p>
             </div>
         </div>
 
@@ -845,6 +874,7 @@
     
     <!-- 조사 회차 / 기관 / 위치 마스터 -->
     <script src="masters.js"></script>
+    <script src="useful-life.js"></script>
     <script src="register.js"></script>
     
     <!-- 메인 앱 스크립트 -->

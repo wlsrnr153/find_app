@@ -1,4 +1,4 @@
-const CACHE_NAME = 'find-app-shell-v3';
+const CACHE_NAME = 'find-app-shell-v5';
 const APP_SHELL = [
     '/index.html',
     '/login.html',
@@ -7,6 +7,7 @@ const APP_SHELL = [
     '/app-optimized.js',
     '/masters.js',
     '/register.js',
+    '/useful-life.js',
     '/offline-queue.js',
     '/firebase-config.js',
     '/manifest.json',
@@ -14,9 +15,16 @@ const APP_SHELL = [
     '/icons/icon-512.png'
 ];
 
+// 덩치가 커서 받다 실패할 수 있는 자산. 실패해도 설치는 성공시키고 나중에 fetch에서 채운다
+const OPTIONAL_ASSETS = [
+    '/useful-life.json'
+];
+
 self.addEventListener('install', (event) => {
     event.waitUntil(
-        caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting())
+        caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL).then(() => Promise.all(
+            OPTIONAL_ASSETS.map((url) => cache.add(url).catch(() => null))
+        ))).then(() => self.skipWaiting())
     );
 });
 

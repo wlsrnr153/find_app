@@ -258,6 +258,10 @@ async function initApp() {
     if (typeof initOfflineQueue === 'function') {
         initOfflineQueue();
     }
+    // 내용연수 표는 화면을 막을 이유가 없으니 배경에서 준비시킨다
+    if (typeof ensureUsefulLifeTable === 'function') {
+        ensureUsefulLifeTable();
+    }
     initTabs();
     initEventListeners();
     initRoleBasedUI();

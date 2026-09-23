@@ -42,11 +42,37 @@ function findItemByAsset(assetNumber, excludeId) {
     ) || null;
 }
 
-function getRegisterProgress() {
+// 조사된 자산번호를 한 번만 Map으로 만들어 대장 행마다 전체 목록을 훑지 않도록 한다
+function buildSurveyedIndex() {
+    const map = new Map();
+    const surveyed = typeof getItemsForView === 'function' ? getItemsForView() : [];
+    surveyed.forEach((item) => {
+        const key = normalizeAsset(item.assetNumber);
+        if (key && !map.has(key)) map.set(key, item);
+    });
+    return map;
+}
+
+const REGISTER_STATUS = {
+    pending: { label: '미조사', cls: 'is-pending' },
+    found: { label: '찾음', cls: 'is-found' },
+    changed: { label: '상태변경', cls: 'is-changed' },
+    missing: { label: '미발견', cls: 'is-missing' },
+    new: { label: '신규', cls: 'is-new' }
+};
+
+function resolveRegisterStatus(record, surveyedIndex) {
+    if (record.status === 'missing') return 'missing';
+    if (record.status === 'changed') return 'changed';
+    if (record.status === 'found') return 'found';
+    return surveyedIndex.has(normalizeAsset(record.assetNumber)) ? 'found' : 'pending';
+}
+
+function getRegisterProgress(surveyedIndex) {
     const register = getRegisterForSurvey();
     const surveyed = typeof getItemsForView === 'function' ? getItemsForView() : [];
+    const index = surveyedIndex || buildSurveyedIndex();
     const registerKeys = new Set(register.map((record) => normalizeAsset(record.assetNumber)).filter(Boolean));
-    const surveyedKeys = new Set(surveyed.map((item) => normalizeAsset(item.assetNumber)).filter(Boolean));
 
     let found = 0;
     let pending = 0;
@@ -54,16 +80,16 @@ function getRegisterProgress() {
     let changed = 0;
 
     register.forEach((record) => {
-        const matched = surveyedKeys.has(normalizeAsset(record.assetNumber));
-        if (record.status === 'missing') missing += 1;
-        else if (record.status === 'changed') changed += 1;
-        else if (record.status === 'found' || matched) found += 1;
+        const status = resolveRegisterStatus(record, index);
+        if (status === 'missing') missing += 1;
+        else if (status === 'changed') changed += 1;
+        else if (status === 'found') found += 1;
         else pending += 1;
     });
 
-    const discovered = surveyed.filter((item) => {
+    const discovered = register.length === 0 ? 0 : surveyed.filter((item) => {
         const key = normalizeAsset(item.assetNumber);
-        return register.length > 0 && (!key || !registerKeys.has(key));
+        return !key || !registerKeys.has(key);
     }).length;
 
     const expected = register.length;
@@ -79,7 +105,7 @@ const REGISTER_LEAN_KEYS = [
     'id', 'surveyId', 'surveyName', 'status', 'createdBy', 'createdAt', 'sourceFile',
     'checkedBy', 'checkedByEmail', 'checkedAt', 'itemId', 'foundItemId',
     'assetNumber', 'itemName', 'organization', 'location', 'building', 'floor', 'room',
-    'category', 'quantity', 'manufacturer', 'model', 'condition'
+    'category', 'goodsClNo', 'quantity', 'acquiredAt', 'manufacturer', 'model', 'condition'
 ];
 
 function leanRegisterRecord(row) {
@@ -439,8 +465,11 @@ const REGISTER_SYSTEM_FIELDS = [
     { key: 'building', label: '건물', aliases: ['건물', '동', '건물명', '단과대학', 'building'] },
     { key: 'floor', label: '층', aliases: ['층', '층수', 'floor'] },
     { key: 'room', label: '실/호', aliases: ['실', '호', '호실', '실명', '학과', 'room'] },
+    // 카테고리보다 먼저 둬야 전용 분류번호 열을 이쪽이 가져간다
+    { key: 'goodsClNo', label: '물품분류번호', aliases: ['물품분류번호', '세부품명번호', '품명번호', '분류번호', '물품코드', 'goodsclno'] },
     { key: 'category', label: '카테고리', aliases: ['카테고리', '계정과목명', '분류번호', '분류', '품목분류', '자산분류', '계정', 'category'] },
     { key: 'quantity', label: '갯수', aliases: ['취득수량', '갯수', '수량', '수량(개)', 'qty', 'quantity'] },
+    { key: 'acquiredAt', label: '취득일자', aliases: ['취득일자', '취득년월일', '취득일', '취득년월', '구입일자', '구입일', '구매일자', '구매일', '등록일자', 'acquired', 'acquisitiondate'] },
     { key: 'manufacturer', label: '제조사', aliases: ['제조사', '제작사', '메이커', '브랜드', 'manufacturer'] },
     { key: 'model', label: '모델명', aliases: ['모델명', '모델', '규격', '사양', 'model'] },
     { key: 'condition', label: '상태', aliases: ['상태', '물품상태', '현재상태', '보유여부', 'condition'] }
@@ -454,6 +483,57 @@ function normalizeHeader(value) {
 
 function headerSignature(headers) {
     return headers.map(normalizeHeader).filter(Boolean).sort().join('|');
+}
+
+// 값이 없으면 1로 채우지만, 값이 있는데 범위를 벗어나면 날짜를 지어내지 않고 포기한다
+function toDateKey(year, month, day) {
+    if (!(year >= 1900 && year <= 2100)) return '';
+    const m = month === undefined ? 1 : month;
+    if (!(m >= 1 && m <= 12)) return '';
+    const lastDay = new Date(Date.UTC(year, m, 0)).getUTCDate();
+    const d = day === undefined ? 1 : day;
+    if (!(d >= 1 && d <= lastDay)) return '';
+    return `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+// 엑셀은 취득일자를 2018-03-15, 2018. 3. 15, 2018년 3월, 20180315, 날짜 시리얼 등 제각각으로 준다.
+// 연·월만 있으면 1일로, 연도만 있으면 1월 1일로 채운다
+function parseAcquiredDate(value) {
+    if (value == null || value === '') return '';
+    // XLSX가 Date 객체를 줄 수도 있다. instanceof는 realm이 다르면 실패하므로 쓰지 않는다
+    if (Object.prototype.toString.call(value) === '[object Date]') {
+        return Number.isNaN(value.getTime()) ? '' : toDateKey(value.getFullYear(), value.getMonth() + 1, value.getDate());
+    }
+
+    const text = String(value).trim();
+    if (!text) return '';
+    const parts = text.match(/\d+/g) || [];
+    if (!parts.length) return '';
+
+    if (parts.length >= 2 && parts[0].length === 4) {
+        return toDateKey(Number(parts[0]), Number(parts[1]), parts.length >= 3 ? Number(parts[2]) : undefined);
+    }
+
+    const digits = parts.join('');
+    if (parts.length === 1) {
+        if (digits.length === 8) return toDateKey(+digits.slice(0, 4), +digits.slice(4, 6), +digits.slice(6, 8));
+        if (digits.length === 6) return toDateKey(+digits.slice(0, 4), +digits.slice(4, 6));
+        if (digits.length === 4) return toDateKey(+digits);
+    }
+
+    // 서식이 안 걸린 날짜 셀은 1899-12-30 기준 일련번호로 넘어온다
+    const serial = Number(text);
+    if (Number.isFinite(serial) && serial >= 367 && serial <= 73415) {
+        const parsed = new Date(Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000);
+        return toDateKey(parsed.getUTCFullYear(), parsed.getUTCMonth() + 1, parsed.getUTCDate());
+    }
+    return '';
+}
+
+// 세부품명번호 10자리로 들어오면 앞 8자리가 물품분류번호다
+function normalizeGoodsClNo(value) {
+    const digits = String(value || '').replace(/\D/g, '');
+    return digits.length >= 8 ? digits.slice(0, 8) : '';
 }
 
 function headerMatchesAlias(header, alias) {
@@ -681,6 +761,11 @@ function applyRegisterMapping(rows, mapping) {
             mapped.location = [mapped.building, mapped.floor, mapped.room].filter(Boolean).join(' ');
         }
         if (!mapped.quantity) mapped.quantity = '1';
+        const rawGoodsCl = mapped.goodsClNo;
+        mapped.goodsClNo = normalizeGoodsClNo(rawGoodsCl);
+        // 분류번호 열을 goodsClNo가 가져가도 기존 분류 표시가 비지 않게 한다
+        if (!mapped.category && rawGoodsCl) mapped.category = rawGoodsCl;
+        mapped.acquiredAt = parseAcquiredDate(mapped.acquiredAt);
         return mapped;
     }).filter((row) => row.assetNumber || row.itemName);
 }
@@ -965,10 +1050,10 @@ function fillFromRegister(registerId) {
     showToast('대장 항목을 입력 폼에 채웠습니다', 'success');
 }
 
-function updateRegisterDashboard() {
+function updateRegisterDashboard(surveyedIndex) {
     const card = document.getElementById('registerProgressCard');
     if (!card) return;
-    const progress = getRegisterProgress();
+    const progress = getRegisterProgress(surveyedIndex);
     if (progress.expected === 0) {
         card.style.display = 'none';
         return;
@@ -988,69 +1073,198 @@ function updateRegisterDashboard() {
     if (bar) bar.style.width = `${progress.percent}%`;
 }
 
-function updateRegisterList() {
-    const list = document.getElementById('registerList');
-    const empty = document.getElementById('registerEmpty');
-    if (!list) return;
-    const surveyId = getRegisterSurveyId();
-    let records = getRegisterForSurvey(surveyId);
+const REGISTER_PAGE_SIZE = 100;
+const REGISTER_STATUS_ORDER = { pending: 0, missing: 1, changed: 2, found: 3, new: 4 };
 
-    if (registerFilter === 'pending') records = records.filter((record) => record.status === 'pending' && !findItemByAsset(record.assetNumber));
-    if (registerFilter === 'found') records = records.filter((record) => record.status === 'found' || record.status === 'changed' || !!findItemByAsset(record.assetNumber));
-    if (registerFilter === 'missing') records = records.filter((record) => record.status === 'missing');
+let registerSearchTerm = '';
+let registerSort = 'default';
+let registerSearchTimer = null;
+let registerRows = [];
+let registerVisibleCount = REGISTER_PAGE_SIZE;
+let registerRenderedSurveyId = null;
+let registerSentinelObserver = null;
+
+function registerRowLocation(source) {
+    return source.location
+        || [source.building, source.floor, source.room].filter(Boolean).join(' ')
+        || source.organization
+        || '';
+}
+
+function buildRegisterRow(source, statusKey, kind) {
+    const row = {
+        id: source.id,
+        kind,
+        statusKey,
+        assetNumber: source.assetNumber || '',
+        itemName: source.itemName || '',
+        location: registerRowLocation(source),
+        quantity: source.quantity || '',
+        category: source.category || '',
+        model: source.model || '',
+        checkedBy: String(source.checkedByEmail || '').split('@')[0]
+    };
+    row.haystack = [
+        row.assetNumber, row.itemName, row.location, row.category, row.model,
+        row.checkedBy, source.organization, REGISTER_STATUS[statusKey]?.label
+    ].filter(Boolean).join(' ').toLowerCase();
+    return row;
+}
+
+function collectRegisterRows(surveyedIndex) {
+    const scoped = getRegisterForSurvey(getRegisterSurveyId());
+
     if (registerFilter === 'new') {
-        const keys = new Set(getRegisterForSurvey(surveyId).map((record) => normalizeAsset(record.assetNumber)));
-        const discovered = (typeof getItemsForView === 'function' ? getItemsForView() : [])
-            .filter((item) => !normalizeAsset(item.assetNumber) || !keys.has(normalizeAsset(item.assetNumber)));
-        list.innerHTML = discovered.length === 0
-            ? ''
-            : discovered.map((item) => `
-                <div class="register-item is-new">
-                    <div>
-                        <strong>${escapeHtml(item.itemName || '이름 없음')}</strong>
-                        <div class="organization-item-count">${escapeHtml(item.assetNumber || '자산번호 없음')} · ${escapeHtml(item.location || item.organization || '-')}</div>
-                    </div>
-                    <span class="survey-item-status active">신규</span>
-                </div>
-            `).join('');
-        if (empty) empty.style.display = discovered.length === 0 ? 'block' : 'none';
-        if (discovered.length === 0 && empty) empty.textContent = '신규 발견 물품이 없습니다';
-        return;
+        const registerKeys = new Set(scoped.map((record) => normalizeAsset(record.assetNumber)).filter(Boolean));
+        const surveyed = typeof getItemsForView === 'function' ? getItemsForView() : [];
+        return surveyed
+            .filter((item) => {
+                const key = normalizeAsset(item.assetNumber);
+                return !key || !registerKeys.has(key);
+            })
+            .map((item) => buildRegisterRow(item, 'new', 'item'));
     }
 
+    const rows = scoped.map((record) =>
+        buildRegisterRow(record, resolveRegisterStatus(record, surveyedIndex), 'register')
+    );
+    if (registerFilter === 'pending') return rows.filter((row) => row.statusKey === 'pending');
+    if (registerFilter === 'found') return rows.filter((row) => row.statusKey === 'found' || row.statusKey === 'changed');
+    if (registerFilter === 'missing') return rows.filter((row) => row.statusKey === 'missing');
+    return rows;
+}
+
+function searchRegisterRows(rows) {
+    const term = registerSearchTerm.trim().toLowerCase();
+    if (!term) return rows;
+    const parts = term.split(/\s+/);
+    return rows.filter((row) => parts.every((part) => row.haystack.includes(part)));
+}
+
+function sortRegisterRows(rows) {
+    if (registerSort === 'default') return rows;
+    const compare = (a, b, key, numeric) =>
+        String(a[key]).localeCompare(String(b[key]), 'ko', numeric ? { numeric: true } : undefined);
+    const sorted = rows.slice();
+    if (registerSort === 'asset') sorted.sort((a, b) => compare(a, b, 'assetNumber', true));
+    else if (registerSort === 'name') sorted.sort((a, b) => compare(a, b, 'itemName'));
+    else if (registerSort === 'location') sorted.sort((a, b) => compare(a, b, 'location'));
+    else if (registerSort === 'status') {
+        sorted.sort((a, b) =>
+            (REGISTER_STATUS_ORDER[a.statusKey] ?? 9) - (REGISTER_STATUS_ORDER[b.statusKey] ?? 9)
+            || compare(a, b, 'assetNumber', true));
+    }
+    return sorted;
+}
+
+function registerRowHtml(row) {
+    const status = REGISTER_STATUS[row.statusKey] || REGISTER_STATUS.pending;
+    const id = escapeHtml(row.id);
+    const actions = row.kind !== 'register' ? '' : [
+        `<button type="button" class="btn btn-secondary btn-small" data-register-action="fill" data-register-id="${id}">실사</button>`,
+        row.statusKey === 'pending'
+            ? `<button type="button" class="btn btn-danger btn-small" data-register-action="missing" data-register-id="${id}">미발견</button>`
+            : ''
+    ].join('');
+    return `
+        <tr>
+            <td><span class="register-status ${status.cls}">${status.label}</span></td>
+            <td class="register-cell-asset">${escapeHtml(row.assetNumber || '-')}</td>
+            <td class="register-cell-name">${escapeHtml(row.itemName || '이름 없음')}</td>
+            <td>${escapeHtml(row.location || '-')}</td>
+            <td class="col-optional">${escapeHtml(row.quantity || '-')}</td>
+            <td class="col-optional">${escapeHtml(row.category || '-')}</td>
+            <td class="col-optional">${escapeHtml(row.model || '-')}</td>
+            <td class="col-optional">${escapeHtml(row.checkedBy || '-')}</td>
+            <td class="register-cell-actions">${actions}</td>
+        </tr>
+    `;
+}
+
+function renderRegisterRows(append) {
+    const tbody = document.getElementById('registerTableBody');
+    if (!tbody) return;
+    const from = append ? tbody.children.length : 0;
+    const html = registerRows.slice(from, registerVisibleCount).map(registerRowHtml).join('');
+    if (append) tbody.insertAdjacentHTML('beforeend', html);
+    else tbody.innerHTML = html;
+}
+
+function registerEmptyMessage(surveyId) {
+    if (!surveyId) return '대장을 보려면 조사 회차를 선택하세요.';
+    if (registerSearchTerm.trim()) return '검색 결과가 없습니다.';
+    if (registerFilter === 'new') return '신규 발견 물품이 없습니다.';
+    if (getRegisterForSurvey(surveyId).length === 0) return '이 회차에 올라온 대장이 없습니다. 관리 탭에서 엑셀을 올리세요.';
+    return '이 조건에 해당하는 항목이 없습니다.';
+}
+
+function updateRegisterListStatus() {
+    const wrap = document.getElementById('registerTableWrap');
+    const empty = document.getElementById('registerEmpty');
+    const count = document.getElementById('registerCount');
+    const total = registerRows.length;
+    const shown = Math.min(registerVisibleCount, total);
+
+    if (wrap) wrap.style.display = total === 0 ? 'none' : 'block';
     if (empty) {
-        empty.style.display = records.length === 0 ? 'block' : 'none';
-        empty.textContent = surveyId ? '이 회차에 올라온 대장이 없습니다. 관리 탭에서 엑셀을 올리세요.' : '대장을 보려면 조사 회차를 선택하세요.';
+        empty.style.display = total === 0 ? 'block' : 'none';
+        if (total === 0) empty.textContent = registerEmptyMessage(getRegisterSurveyId());
     }
+    if (count) {
+        count.textContent = total === 0 ? ''
+            : shown >= total ? `${total}건 모두 표시`
+            : `${total}건 중 ${shown}건 표시 · 아래로 스크롤하면 계속 불러옵니다`;
+    }
+}
 
-    list.innerHTML = records.map((record) => {
-        const matched = !!findItemByAsset(record.assetNumber);
-        const status = record.status === 'missing' ? '미발견'
-            : record.status === 'changed' ? '상태변경'
-            : (record.status === 'found' || matched) ? '찾음'
-            : '미조사';
-        const statusClass = status === '찾음' || status === '상태변경' ? 'active'
-            : status === '미발견' ? 'closed'
-            : '';
-        return `
-            <div class="register-item">
-                <div>
-                    <strong>${escapeHtml(record.itemName || '이름 없음')}</strong>
-                    <div class="organization-item-count">${escapeHtml(record.assetNumber || '-')} · ${escapeHtml(record.location || record.organization || '-')}</div>
-                </div>
-                <div class="register-item-actions">
-                    <span class="survey-item-status ${statusClass}">${status}</span>
-                    <button class="btn btn-secondary btn-small" onclick="fillFromRegister('${record.id}')">실사</button>
-                    ${status === '미조사' ? `<button class="btn btn-danger btn-small" onclick="markRegisterMissing('${record.id}')">미발견</button>` : ''}
-                </div>
-            </div>
-        `;
-    }).join('');
+function appendRegisterPage() {
+    if (registerVisibleCount >= registerRows.length) return;
+    registerVisibleCount = Math.min(registerVisibleCount + REGISTER_PAGE_SIZE, registerRows.length);
+    renderRegisterRows(true);
+    updateRegisterListStatus();
+    syncRegisterSentinel();
+
+    // 채운 뒤에도 sentinel이 계속 보이면 교차 상태가 그대로여서 관찰자가 다시 발화하지 않는다
+    requestAnimationFrame(() => {
+        const wrap = document.getElementById('registerTableWrap');
+        const sentinel = document.getElementById('registerSentinel');
+        if (!wrap || !sentinel || registerVisibleCount >= registerRows.length) return;
+        if (sentinel.getBoundingClientRect().top <= wrap.getBoundingClientRect().bottom) appendRegisterPage();
+    });
+}
+
+function syncRegisterSentinel() {
+    const sentinel = document.getElementById('registerSentinel');
+    if (!sentinel) return;
+    const hasMore = registerVisibleCount < registerRows.length;
+    sentinel.style.display = hasMore ? 'block' : 'none';
+    if (!hasMore || registerSentinelObserver) return;
+    registerSentinelObserver = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) appendRegisterPage();
+    }, { root: document.getElementById('registerTableWrap'), rootMargin: '150px' });
+    registerSentinelObserver.observe(sentinel);
+}
+
+function updateRegisterList(options = {}) {
+    if (!document.getElementById('registerTableBody')) return;
+    const surveyId = getRegisterSurveyId();
+    const surveyedIndex = options.surveyedIndex || buildSurveyedIndex();
+
+    registerRows = sortRegisterRows(searchRegisterRows(collectRegisterRows(surveyedIndex)));
+    if (!options.preserveWindow || surveyId !== registerRenderedSurveyId) {
+        registerVisibleCount = REGISTER_PAGE_SIZE;
+    }
+    registerRenderedSurveyId = surveyId;
+
+    renderRegisterRows(false);
+    updateRegisterListStatus();
+    syncRegisterSentinel();
 }
 
 function refreshRegisterViews() {
-    updateRegisterDashboard();
-    updateRegisterList();
+    const surveyedIndex = buildSurveyedIndex();
+    updateRegisterDashboard(surveyedIndex);
+    updateRegisterList({ preserveWindow: true, surveyedIndex });
     updateAssetCheckBanner();
 }
 
@@ -1168,12 +1382,47 @@ function initRegister() {
     }
 
     document.querySelectorAll('[data-register-filter]').forEach((btn) => {
+        if (btn.dataset.bound) return;
+        btn.dataset.bound = 'true';
         btn.addEventListener('click', () => {
             registerFilter = btn.dataset.registerFilter;
             document.querySelectorAll('[data-register-filter]').forEach((el) => el.classList.toggle('active', el === btn));
             updateRegisterList();
         });
     });
+
+    const registerBody = document.getElementById('registerTableBody');
+    if (registerBody && !registerBody.dataset.bound) {
+        registerBody.dataset.bound = 'true';
+        registerBody.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-register-action]');
+            if (!btn) return;
+            const id = btn.dataset.registerId;
+            if (btn.dataset.registerAction === 'fill') fillFromRegister(id);
+            else if (btn.dataset.registerAction === 'missing') markRegisterMissing(id);
+        });
+    }
+
+    const registerSearch = document.getElementById('registerSearch');
+    if (registerSearch && !registerSearch.dataset.bound) {
+        registerSearch.dataset.bound = 'true';
+        registerSearch.addEventListener('input', () => {
+            clearTimeout(registerSearchTimer);
+            registerSearchTimer = setTimeout(() => {
+                registerSearchTerm = registerSearch.value;
+                updateRegisterList();
+            }, 200);
+        });
+    }
+
+    const registerSortSelect = document.getElementById('registerSort');
+    if (registerSortSelect && !registerSortSelect.dataset.bound) {
+        registerSortSelect.dataset.bound = 'true';
+        registerSortSelect.addEventListener('change', () => {
+            registerSort = registerSortSelect.value;
+            updateRegisterList();
+        });
+    }
 
     listenRegisterChunks();
     idbReadRegisters().then((localRows) => {
