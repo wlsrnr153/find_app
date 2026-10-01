@@ -832,6 +832,33 @@ function matchUsefulLife(input) {
     return usefulLifeMatchResult(null, [], false);
 }
 
+const USEFUL_LIFE_VERDICT_LABEL = {
+    resolved: '확정',
+    unnotified: '미고시',
+    ambiguous: '확인필요',
+    missing: '못찾음'
+};
+
+const USEFUL_LIFE_STATUS_LABEL = {
+    expired: '경과',
+    due: '임박',
+    ok: '정상',
+    unknown: '미산정'
+};
+
+const USEFUL_LIFE_MATCH_LABEL = {
+    code: '분류번호',
+    alias: '학습사전',
+    exact: '정확일치',
+    contains: '품명포함'
+};
+
+function usefulLifeCandidateText(candidates, limit = 5) {
+    return (candidates || []).slice(0, limit)
+        .map((candidate) => `${candidate.goodsClNm}=${candidate.notified ? candidate.usefulLife + '년' : '미고시'}`)
+        .join(', ');
+}
+
 function isoDateKey(date) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }

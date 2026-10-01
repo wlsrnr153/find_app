@@ -1092,6 +1092,137 @@ async function confirmRegisterMapping() {
     }
 }
 
+// 대장 전체를 내용연수 매칭 결과와 함께 내보낸다. 화면을 만들기 전에 결과를 눈으로 확인하는 용도다
+async function exportRegisterUsefulLife() {
+    if (typeof describeUsefulLife !== 'function') {
+        showToast('내용연수 모듈을 불러오지 못했습니다', 'error');
+        return;
+    }
+    const scoped = getRegisterForSurvey(getRegisterSurveyId());
+    if (!scoped.length) {
+        showToast('내보낼 대장이 없습니다. 먼저 대장 엑셀을 올려 주세요', 'error');
+        return;
+    }
+    if (!(await ensureUsefulLifeTable())) {
+        showToast('내용연수 표를 불러오지 못했습니다', 'error');
+        return;
+    }
+
+    try {
+        const surveyedIndex = buildSurveyedIndex();
+        const today = isoDateKey(new Date());
+        const verdicts = { resolved: 0, unnotified: 0, ambiguous: 0, missing: 0 };
+        const statuses = { expired: 0, due: 0, ok: 0, unknown: 0 };
+        const uniqueNames = new Set();
+        const needsCheck = new Map();
+        let withDate = 0;
+
+        const detail = scoped.map((record) => {
+            const info = describeUsefulLife({
+                itemName: record.itemName,
+                goodsClNo: record.goodsClNo,
+                acquiredAt: record.acquiredAt
+            }, today);
+
+            verdicts[info.verdict] += 1;
+            statuses[info.status] += 1;
+            if (record.acquiredAt) withDate += 1;
+
+            const nameKey = normalizeGoodsName(record.itemName);
+            if (nameKey) uniqueNames.add(nameKey);
+            // 확인이 필요한 건 고유 물품명 단위로 묶는다. 같은 이름 수백 대를 한 번만 고르면 된다
+            if (nameKey && (info.verdict === 'ambiguous' || info.verdict === 'missing')) {
+                const bucket = needsCheck.get(nameKey);
+                if (bucket) bucket.count += 1;
+                else needsCheck.set(nameKey, { itemName: record.itemName, count: 1, info });
+            }
+
+            return {
+                '자산번호': record.assetNumber || '',
+                '물품명': record.itemName || '',
+                '대조상태': REGISTER_STATUS[resolveRegisterStatus(record, surveyedIndex)]?.label || '',
+                '취득일자': record.acquiredAt || '',
+                '대장분류번호': record.goodsClNo || '',
+                '매칭판정': USEFUL_LIFE_VERDICT_LABEL[info.verdict] || '',
+                '매칭경로': USEFUL_LIFE_MATCH_LABEL[info.match] || '',
+                '고시분류번호': info.goodsClNo,
+                '고시품명': info.goodsClNm,
+                '내용연수': info.usefulLife || '',
+                '만료일': info.expiry,
+                '내구연한': USEFUL_LIFE_STATUS_LABEL[info.status] || '',
+                // 미산정이면 비고에 이유가 적히므로 같은 말을 두 번 쓰지 않는다
+                '경과·남은기간': info.status === 'unknown' ? '' : info.label,
+                '비고': info.note,
+                '후보': usefulLifeCandidateText(info.candidates),
+                '위치': registerRowLocation(record),
+                '수량': record.quantity || ''
+            };
+        });
+
+        const checkList = [...needsCheck.values()]
+            .sort((a, b) => b.count - a.count)
+            .map((entry) => ({
+                '물품명': entry.itemName,
+                '대장 건수': entry.count,
+                '판정': USEFUL_LIFE_VERDICT_LABEL[entry.info.verdict] || '',
+                '후보 수': entry.info.candidates.length,
+                '후보': usefulLifeCandidateText(entry.info.candidates, 12)
+            }));
+
+        const meta = getUsefulLifeMeta() || {};
+        const summary = [
+            ['대장 총 건수', scoped.length],
+            ['고유 물품명', uniqueNames.size],
+            ['', ''],
+            ['매칭 확정', verdicts.resolved],
+            ['매칭 미고시', verdicts.unnotified],
+            ['매칭 확인필요', verdicts.ambiguous],
+            ['매칭 못찾음', verdicts.missing],
+            ['', ''],
+            ['내구연한 경과', statuses.expired],
+            ['내구연한 임박(1년 이내)', statuses.due],
+            ['내구연한 정상', statuses.ok],
+            ['내구연한 미산정', statuses.unknown],
+            ['', ''],
+            ['취득일자 있음', withDate],
+            ['취득일자 없음', scoped.length - withDate],
+            ['', ''],
+            ['사람이 확인할 고유 물품명', checkList.length],
+            ['학습된 사전 항목', typeof getUsefulLifeAliases === 'function' ? getUsefulLifeAliases().length : 0],
+            ['', ''],
+            ['내용연수 표 기준일', meta.기준일 || ''],
+            ['내용연수 표 건수', meta.건수 || 0],
+            ['그중 고시 건수', meta.고시건수 || 0],
+            ['내보낸 날짜', today]
+        ].map(([항목, 값]) => ({ 항목, 값 }));
+
+        const workbook = XLSX.utils.book_new();
+        const detailSheet = XLSX.utils.json_to_sheet(detail);
+        detailSheet['!cols'] = [
+            { wch: 16 }, { wch: 24 }, { wch: 10 }, { wch: 12 }, { wch: 14 },
+            { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 24 }, { wch: 9 },
+            { wch: 12 }, { wch: 10 }, { wch: 16 }, { wch: 24 }, { wch: 50 },
+            { wch: 20 }, { wch: 6 }
+        ];
+        XLSX.utils.book_append_sheet(workbook, detailSheet, '대조결과');
+
+        const checkSheet = XLSX.utils.json_to_sheet(checkList.length ? checkList : [{ '물품명': '확인이 필요한 물품명이 없습니다' }]);
+        checkSheet['!cols'] = [{ wch: 24 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 90 }];
+        XLSX.utils.book_append_sheet(workbook, checkSheet, '확인필요');
+
+        const summarySheet = XLSX.utils.json_to_sheet(summary);
+        summarySheet['!cols'] = [{ wch: 26 }, { wch: 14 }];
+        XLSX.utils.book_append_sheet(workbook, summarySheet, '요약');
+
+        const surveyLabel = (typeof getCurrentSurvey === 'function' && getCurrentSurvey()?.name) || '선택회차';
+        XLSX.writeFile(workbook, `내용연수대조_${surveyLabel}_${today}.xlsx`);
+        showToast(`${scoped.length}건을 내보냈습니다. 확인 필요 ${checkList.length}개 물품명`, 'success');
+    } catch (error) {
+        console.error('내용연수 대조 내보내기 실패:', error);
+        showToast('엑셀 생성 중 오류가 발생했습니다', 'error');
+    }
+}
+
 function downloadRegisterTemplate() {
     const worksheet = XLSX.utils.json_to_sheet([
         {
@@ -1458,6 +1589,12 @@ function initRegister() {
     }
     const templateBtn = document.getElementById('downloadRegisterTemplateBtn');
     if (templateBtn) templateBtn.addEventListener('click', downloadRegisterTemplate);
+
+    const usefulLifeExportBtn = document.getElementById('exportRegisterUsefulLifeBtn');
+    if (usefulLifeExportBtn && !usefulLifeExportBtn.dataset.bound) {
+        usefulLifeExportBtn.dataset.bound = 'true';
+        usefulLifeExportBtn.addEventListener('click', exportRegisterUsefulLife);
+    }
 
     const closeMap = document.getElementById('closeRegisterMap');
     const cancelMap = document.getElementById('cancelRegisterMapBtn');
