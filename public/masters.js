@@ -175,6 +175,7 @@ function flattenUserMasters(docs) {
             });
         });
     });
+    applyUsefulLifeAliasDocs(docs);
     surveys = nextSurveys.sort((a, b) => getSafeDate(b.createdAt) - getSafeDate(a.createdAt));
     organizationRecords = nextOrgs.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
     organizations = organizationRecords.map((org) => org.name);
@@ -221,6 +222,82 @@ function listenUserMasters() {
         if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
     }, (error) => {
         console.warn('사용자 문서 마스터 로드 실패:', error);
+    });
+}
+
+const USEFUL_LIFE_ALIAS_FIELD = 'usefulLifeAliases';
+
+function applyUsefulLifeAliasDocs(docs) {
+    if (typeof setUsefulLifeAliases !== 'function') return 0;
+    const merged = [];
+    docs.forEach((doc) => {
+        (doc.data()?.[USEFUL_LIFE_ALIAS_FIELD] || []).forEach((record) => {
+            if (record && record.nameKey && record.goodsClNo) {
+                merged.push({ ...record, decidedBy: record.decidedBy || doc.id });
+            }
+        });
+    });
+    const count = setUsefulLifeAliases(merged);
+    if (typeof cacheUsefulLifeAliases === 'function') cacheUsefulLifeAliases();
+    return count;
+}
+
+// 사전은 users 문서 전체를 합쳐서 쓴다. 한 사람이 고르면 팀 전체가 쓴다
+async function loadUsefulLifeAliases() {
+    if (typeof setUsefulLifeAliases !== 'function') return 0;
+    try {
+        return applyUsefulLifeAliasDocs((await db.collection('users').get()).docs);
+    } catch (error) {
+        console.warn('내용연수 사전 로드 실패, 로컬 사본을 씁니다:', error);
+        return typeof restoreUsefulLifeAliases === 'function' ? restoreUsefulLifeAliases() : 0;
+    }
+}
+
+// 규칙상 고칠 수 있는 건 자기 문서뿐이다. 같은 이름을 다시 고르면 arrayUnion으로 쌓지 않고 갈아끼운다
+async function writeOwnUsefulLifeAliases(mutate) {
+    if (!currentUser) throw new Error('로그인이 필요합니다');
+    const ref = db.collection('users').doc(currentUser.uid);
+    const saved = (await ref.get()).data()?.[USEFUL_LIFE_ALIAS_FIELD];
+    const current = Array.isArray(saved) ? saved : [];
+    const next = mutate(current);
+    if (next === current) return false;
+    await ref.set({ [USEFUL_LIFE_ALIAS_FIELD]: next }, { merge: true });
+    return true;
+}
+
+async function saveUsefulLifeAlias({ nameKey, goodsClNo, goodsClNm, usefulLife }) {
+    if (!currentUser) throw new Error('로그인이 필요합니다');
+    const record = {
+        id: newMasterId('ul'),
+        nameKey: normalizeGoodsName(nameKey),
+        goodsClNo: String(goodsClNo || '').trim(),
+        goodsClNm: String(goodsClNm || ''),
+        usefulLife: Number(usefulLife) || 0,
+        decidedBy: currentUser.uid,
+        decidedByEmail: currentUser.email || '',
+        decidedAt: new Date().toISOString()
+    };
+    if (!record.nameKey || !record.goodsClNo) throw new Error('물품명과 분류번호가 필요합니다');
+
+    // 화면이 Firestore 응답을 기다리지 않게 먼저 반영한다
+    setUsefulLifeAliases([...getUsefulLifeAliases(), record]);
+    cacheUsefulLifeAliases();
+    await writeOwnUsefulLifeAliases((list) => [
+        ...list.filter((saved) => normalizeGoodsName(saved && saved.nameKey) !== record.nameKey),
+        record
+    ]);
+    return record;
+}
+
+// 남이 고른 것은 지울 수 없다. 그건 새로 저장해서 덮어쓴다(가장 최근 결정이 이긴다)
+async function removeUsefulLifeAlias(nameKey) {
+    const key = normalizeGoodsName(nameKey);
+    if (!key) return false;
+    setUsefulLifeAliases(getUsefulLifeAliases().filter((record) => record.nameKey !== key));
+    cacheUsefulLifeAliases();
+    return writeOwnUsefulLifeAliases((list) => {
+        const next = list.filter((record) => normalizeGoodsName(record && record.nameKey) !== key);
+        return next.length === list.length ? list : next;
     });
 }
 

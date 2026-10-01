@@ -5,6 +5,7 @@ const USEFUL_LIFE_URL = 'useful-life.json';
 const USEFUL_LIFE_DB = 'find-app-usefullife';
 const USEFUL_LIFE_STORE = 'snapshot';
 const USEFUL_LIFE_KEY = 'current';
+const USEFUL_LIFE_ALIAS_CACHE_KEY = 'usefulLifeAliases';
 // 고시는 자주 바뀌지 않으므로 일주일에 한 번만 배경 갱신한다
 const USEFUL_LIFE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
@@ -16,12 +17,15 @@ const USEFUL_LIFE_MAX_CANDIDATES = 12;
 const USEFUL_LIFE_MIN_SIMILARITY = 0.4;
 // 비정상적으로 긴 물품명이 부분 문자열 탐색을 폭주시키지 않게 자른다
 const USEFUL_LIFE_MAX_KEY_LEN = 40;
+// 만료 1년 전부터 임박으로 본다. 교체 예산을 다음 해에 잡아야 하기 때문이다
+const USEFUL_LIFE_DUE_SOON_DAYS = 365;
 
 let usefulLifeTable = null;
 let usefulLifeByCode = null;
 let usefulLifeByName = null;
 let usefulLifeBigramIndex = null;
 let usefulLifeAliasMap = new Map();
+let usefulLifeAliasRecords = [];
 let usefulLifeLoading = null;
 
 // scripts/fetch-useful-life.js의 normalizeGoodsName과 같은 규칙이어야 한다
@@ -185,13 +189,41 @@ function lookupUsefulLifeByName(name) {
 
 // 학습된 사전(물품명 → 분류번호)을 엔진에 물린다. masters.js 쪽에서 채워 준다
 function setUsefulLifeAliases(pairs) {
-    usefulLifeAliasMap = new Map();
+    const byKey = new Map();
     (pairs || []).forEach((pair) => {
         const key = normalizeGoodsName(pair && pair.nameKey);
         const code = String((pair && pair.goodsClNo) || '').trim();
-        if (key && code) usefulLifeAliasMap.set(key, code);
+        if (!key || !code) return;
+        const previous = byKey.get(key);
+        // 같은 이름을 다르게 고른 사람이 있으면 가장 최근 결정을 따른다
+        if (previous && String(previous.decidedAt || '') > String(pair.decidedAt || '')) return;
+        byKey.set(key, { ...pair, nameKey: key, goodsClNo: code });
     });
-    return usefulLifeAliasMap.size;
+    usefulLifeAliasRecords = [...byKey.values()];
+    usefulLifeAliasMap = new Map(usefulLifeAliasRecords.map((record) => [record.nameKey, record.goodsClNo]));
+    return usefulLifeAliasRecords.length;
+}
+
+function getUsefulLifeAliases() {
+    return usefulLifeAliasRecords;
+}
+
+// 오프라인에서도 사전이 살아 있어야 해서 Firestore와 별개로 한 벌 남긴다
+function cacheUsefulLifeAliases() {
+    try {
+        localStorage.setItem(USEFUL_LIFE_ALIAS_CACHE_KEY, JSON.stringify(usefulLifeAliasRecords));
+    } catch (err) {
+        console.warn('내용연수 사전 캐시 실패:', err);
+    }
+}
+
+function restoreUsefulLifeAliases() {
+    try {
+        return setUsefulLifeAliases(JSON.parse(localStorage.getItem(USEFUL_LIFE_ALIAS_CACHE_KEY) || '[]'));
+    } catch (err) {
+        console.warn('내용연수 사전 복원 실패:', err);
+        return 0;
+    }
 }
 
 function bigramsOf(text) {
@@ -364,4 +396,100 @@ function matchUsefulLife(input) {
 
     // 6. 마지막으로 글자쌍이 비슷한 것들
     return usefulLifeMatchResult(null, findSimilarNames(key), false);
+}
+
+function isoDateKey(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function splitDateKey(key) {
+    const parts = String(key || '').split('-').map(Number);
+    return parts.length === 3 && parts.every((part) => Number.isFinite(part)) ? parts : null;
+}
+
+// 취득일에 내용연수를 더한 날이 내구연한이 끝나는 날이다
+function addYearsToDateKey(key, years) {
+    const parts = splitDateKey(key);
+    if (!parts) return '';
+    const [year, month, day] = parts;
+    const target = year + Number(years);
+    // 2020-02-29에 1년을 더하면 없는 날이 되므로 그 달 마지막 날로 맞춘다
+    const lastDay = new Date(Date.UTC(target, month, 0)).getUTCDate();
+    return `${target}-${String(month).padStart(2, '0')}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
+}
+
+function daysBetweenDateKeys(fromKey, toKey) {
+    const from = splitDateKey(fromKey);
+    const to = splitDateKey(toKey);
+    if (!from || !to) return null;
+    const ms = Date.UTC(to[0], to[1] - 1, to[2]) - Date.UTC(from[0], from[1] - 1, from[2]);
+    return Math.round(ms / 86400000);
+}
+
+// 몇 년 몇 개월인지로 읽어 준다. 1년이 안 되면 개월, 한 달이 안 되면 일로 떨어진다
+function durationLabel(fromKey, toKey) {
+    const from = splitDateKey(fromKey);
+    const to = splitDateKey(toKey);
+    if (!from || !to) return '';
+    let months = (to[0] - from[0]) * 12 + (to[1] - from[1]);
+    if (to[2] < from[2]) months -= 1;
+    if (months < 0) months = 0;
+    const years = Math.floor(months / 12);
+    const restMonths = months % 12;
+    if (years && restMonths) return `${years}년 ${restMonths}개월`;
+    if (years) return `${years}년`;
+    if (restMonths) return `${restMonths}개월`;
+    return `${Math.max(daysBetweenDateKeys(fromKey, toKey) || 0, 0)}일`;
+}
+
+function usefulLifeStatus(acquiredAt, years, today) {
+    const todayKey = today || isoDateKey(new Date());
+    if (!acquiredAt) return { status: 'unknown', reason: 'no-date', expiry: '', days: null, label: '취득일자 없음' };
+    if (!(Number(years) > 0)) return { status: 'unknown', reason: 'no-life', expiry: '', days: null, label: '내용연수 없음' };
+
+    const expiry = addYearsToDateKey(acquiredAt, years);
+    const days = expiry ? daysBetweenDateKeys(todayKey, expiry) : null;
+    if (days === null) return { status: 'unknown', reason: 'bad-date', expiry: '', days: null, label: '취득일자 형식 오류' };
+
+    if (days === 0) return { status: 'expired', reason: null, expiry, days, label: '오늘 만료' };
+    if (days < 0) return { status: 'expired', reason: null, expiry, days, label: `${durationLabel(expiry, todayKey)} 경과` };
+    if (days <= USEFUL_LIFE_DUE_SOON_DAYS) {
+        return { status: 'due', reason: null, expiry, days, label: `${durationLabel(todayKey, expiry)} 남음` };
+    }
+    return { status: 'ok', reason: null, expiry, days, label: `${durationLabel(todayKey, expiry)} 남음` };
+}
+
+// 매칭 결과와 취득일자를 합쳐 화면에 바로 쓸 형태로 만든다
+function describeUsefulLife(input, today) {
+    const source = input || {};
+    const match = matchUsefulLife(source);
+    const entry = match.entry;
+    const years = entry ? entry.usefulLife : 0;
+    const life = usefulLifeStatus(source.acquiredAt, years, today);
+
+    let note = '';
+    if (life.status === 'unknown') {
+        if (life.reason === 'no-date') note = '취득일자가 없습니다';
+        else if (life.reason === 'bad-date') note = '취득일자를 읽을 수 없습니다';
+        else if (match.verdict === 'unnotified') note = '고시된 내용연수가 없습니다';
+        else if (match.verdict === 'ambiguous') note = '물품명 확인이 필요합니다';
+        else note = '내용연수 표에서 찾지 못했습니다';
+    }
+
+    return {
+        verdict: match.verdict,
+        auto: match.auto,
+        candidates: match.candidates,
+        goodsClNo: entry ? entry.goodsClNo : '',
+        goodsClNm: entry ? entry.goodsClNm : '',
+        usefulLife: years,
+        notified: entry ? entry.notified : false,
+        match: entry ? entry.match : '',
+        acquiredAt: source.acquiredAt || '',
+        expiry: life.expiry,
+        status: life.status,
+        days: life.days,
+        label: life.label,
+        note
+    };
 }

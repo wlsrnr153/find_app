@@ -258,9 +258,16 @@ async function initApp() {
     if (typeof initOfflineQueue === 'function') {
         initOfflineQueue();
     }
-    // 내용연수 표는 화면을 막을 이유가 없으니 배경에서 준비시킨다
+    // 내용연수 표와 학습 사전은 화면을 막을 이유가 없으니 배경에서 준비시킨다.
+    // 로컬 사본을 먼저 물려 두면 오프라인이거나 Firestore가 늦어도 매칭이 된다
+    if (typeof restoreUsefulLifeAliases === 'function') {
+        restoreUsefulLifeAliases();
+    }
     if (typeof ensureUsefulLifeTable === 'function') {
         ensureUsefulLifeTable();
+    }
+    if (typeof loadUsefulLifeAliases === 'function') {
+        loadUsefulLifeAliases();
     }
     initTabs();
     initEventListeners();
