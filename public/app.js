@@ -8,7 +8,7 @@ let currentEditId = null;
 let unsubscribe = null;
 let currentSort = 'newest';
 let continuousMode = false;
-let selectedFields = ['surveyor', 'organization', 'location', 'itemName', 'assetNumber', 'quantity'];
+let selectedFields = ['surveyor', 'organization', 'location', 'itemName', 'acquiredAt', 'usefulLife', 'assetNumber', 'quantity'];
 let organizations = [];
 let currentOrganization = '';
 
@@ -421,6 +421,8 @@ function switchTab(tabName) {
         if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
     } else if (tabName === 'register') {
         if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
+    } else if (tabName === 'usefullife') {
+        if (typeof refreshUsefulLifeRegisterTab === 'function') refreshUsefulLifeRegisterTab();
     } else if (tabName === 'list') {
         // 🔥 핵심: loadItems()가 알아서 중복 체크함
         loadItems(); // 내부에서 이미 등록되어 있으면 데이터만 표시 (읽기 0회)
@@ -1347,6 +1349,11 @@ function resetFormKeepCommon() {
     if (!commonValues['quantity']) {
         document.getElementById('quantity').value = '1';
     }
+    ['goodsClNo', 'goodsClNm', 'usefulLife'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    if (typeof refreshUsefulLifeUi === 'function') refreshUsefulLifeUi({ force: true });
     
     // 물품명 포커스
     document.getElementById('itemName').focus();
@@ -1366,6 +1373,7 @@ function resetFormAfterAdd() {
         document.getElementById('organization').value = currentOrganization;
     }
     if (typeof updateLocationPreview === 'function') updateLocationPreview();
+    if (typeof refreshUsefulLifeUi === 'function') refreshUsefulLifeUi({ force: true });
 }
 
 // 물품 추가

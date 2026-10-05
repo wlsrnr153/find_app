@@ -14,7 +14,7 @@ vm.createContext(sandbox);
 vm.runInContext(source, sandbox, { filename: 'useful-life.js' });
 sandbox.applyUsefulLifeSnapshot(snapshot);
 
-const { matchUsefulLife, setUsefulLifeAliases, getUsefulLifeMeta } = sandbox;
+const { matchUsefulLife, setUsefulLifeAliases, getUsefulLifeMeta, searchUsefulLifeClasses } = sandbox;
 
 let failed = 0;
 function check(label, actual, expected) {
@@ -66,12 +66,12 @@ check('냉장고 후보에 김치냉장고', fridge.candidates.some((c) => c.goo
 check('냉장고 후보 연수가 갈림', new Set(fridge.candidates.filter((c) => c.notified).map((c) => c.usefulLife)).size > 1, true);
 
 const aircon = matchUsefulLife('에어컨');
-check('에어컨 판정', aircon.verdict, 'ambiguous');
-check('에어컨 자동확정 안 함', aircon.auto, false);
+check('에어컨 약칭 확정', aircon.verdict, 'resolved');
+check('에어컨 → 냉방기', aircon.entry?.goodsClNm, '냉방기');
 
 console.log('\n[짧은 품명이 긴 이름에 끼어들어 오탐을 내면 안 된다]');
 check('회의자료 ⊅ 의자', matchUsefulLife('회의자료').auto, false);
-check('에어컨 ⊅ 에어컨베이어', aircon.entry, null);
+check('에어컨은 에어컨베이어가 아님', aircon.entry?.goodsClNm !== '에어컨베이어', true);
 // 글자쌍이 하나만 겹치는 건 우연이다. 무전기 → 전기로/반전기 같은 후보를 내면 안 된다
 check('무전기는 못찾음', matchUsefulLife('무전기').verdict, 'missing');
 const scale = matchUsefulLife('전자저울');
@@ -81,7 +81,7 @@ console.log('\n[합성 물품명 – 품명을 통째로 품으면 확정, 아�
 [
     ['전동드릴세트', true],
     ['사무용의자', false],
-    ['회의용책상', false],
+    ['회의용책상', true],
     ['이동식칠판', false],
     ['실험대 1800x750', false]
 ].forEach(([name, shouldAuto]) => {
@@ -90,13 +90,70 @@ console.log('\n[합성 물품명 – 품명을 통째로 품으면 확정, 아�
     check(label, r.auto && !!r.entry && r.entry.match === 'contains', shouldAuto);
 });
 
+console.log('\n[현장 약칭 동의어]');
+[
+    ['노트북', '노트북컴퓨터', 6],
+    ['데스크탑', '데스크톱컴퓨터', 5],
+    ['빔프로젝터', '비디오프로젝터', 9],
+    ['팩스', '팩스기기', 7],
+    ['승용차', '승용자동차', 8],
+    ['에어컨', '냉방기', 10]
+].forEach(([input, name, years]) => {
+    const r = summary(input);
+    check(`${input} → ${name}`, r, {
+        verdict: years > 0 ? 'resolved' : 'unnotified',
+        years: years > 0 ? years : 0,
+        match: 'synonym',
+        auto: true,
+        candidates: 0
+    });
+    check(`${input} 품명`, matchUsefulLife(input).entry.goodsClNm, name);
+});
+
+console.log('\n[영한 변환·제품군]');
+[
+    ['laptop', '노트북컴퓨터', 'synonym'],
+    ['Laptop Computer', '노트북컴퓨터', 'locale'],
+    ['partition', '패널시스템용칸막이', 'synonym'],
+    ['파티션', '패널시스템용칸막이', 'synonym'],
+    ['projector', '비디오프로젝터', 'synonym'],
+    ['air conditioner', '냉방기', 'synonym']
+].forEach(([input, name, match]) => {
+    const r = matchUsefulLife(input);
+    check(`${input} → ${name}`, r.entry?.goodsClNm, name);
+    check(`${input} match`, r.entry?.match, match);
+    check(`${input} 자동확정`, r.auto, true);
+});
+
+const partitionFamily = matchUsefulLife('사무실 칸막이');
+check('칸막이 후보에 패널시스템용칸막이', partitionFamily.candidates.some((c) => c.goodsClNm === '패널시스템용칸막이') || partitionFamily.entry?.goodsClNm === '패널시스템용칸막이', true);
+
+const monitorFamily = matchUsefulLife('LED MONITOR');
+check('모니터 영문 후보 있음', !!(monitorFamily.entry || monitorFamily.candidates.length), true);
+
 console.log('\n[학습 사전이 후보 고르기를 대신한다]');
-check('사전 등록 전', summary('에어컨').verdict, 'ambiguous');
-setUsefulLifeAliases([{ nameKey: '에어컨', goodsClNo: '40101701' }]);
-check('사전 등록 후', summary('에어컨'), { verdict: 'resolved', years: 10, match: 'alias', auto: true, candidates: 0 });
-check('사전은 정규화해서 맞춘다', summary(' 에어컨 ').match, 'alias');
+check('사전 등록 전(냉장고)', summary('냉장고').verdict, 'ambiguous');
+setUsefulLifeAliases([{ nameKey: '냉장고', goodsClNo: '24131501' }]);
+// 대형냉장고 코드가 환경마다 다를 수 있어 품명으로 확인
+const fridgeAliasCode = matchUsefulLife('대형냉장고').entry?.goodsClNo;
+setUsefulLifeAliases([{ nameKey: '냉장고', goodsClNo: fridgeAliasCode }]);
+check('사전 등록 후', summary('냉장고'), {
+    verdict: 'resolved',
+    years: matchUsefulLife('대형냉장고').entry.usefulLife,
+    match: 'alias',
+    auto: true,
+    candidates: 0
+});
+check('사전은 정규화해서 맞춘다', summary(' 냉장고 ').match, 'alias');
 setUsefulLifeAliases([]);
-check('사전 비우면 원래대로', summary('에어컨').verdict, 'ambiguous');
+check('사전 비우면 원래대로', summary('냉장고').verdict, 'ambiguous');
+
+console.log('\n[검색]');
+const searched = searchUsefulLifeClasses('노트북', 5);
+check('검색 결과 있음', searched.length > 0, true);
+check('검색 1순위 노트북컴퓨터', searched[0].goodsClNm, '노트북컴퓨터');
+const cameraAll = searchUsefulLifeClasses('카메라', 20000);
+check('카메라 검색은 20개보다 많다', cameraAll.length > 20, true);
 
 console.log('\n[빈 입력]');
 check('빈 문자열', summary(''), { verdict: 'missing', years: null, match: null, auto: false, candidates: 0 });
@@ -115,6 +172,14 @@ samples.forEach((name) => {
     console.log(`  ${name.padEnd(16)} ${r.verdict.padEnd(11)} ${detail}`);
 });
 console.log(`  합계 ${JSON.stringify(tally)}`);
+
+console.log('\n[넓은 후보]');
+const broadCamera = sandbox.collectUsefulLifeBroadCandidates('디지탈카메라', 12);
+const broadCameraWide = sandbox.collectUsefulLifeBroadCandidates('디지탈카메라', 20);
+check('카메라 유사 후보 여러 개', broadCamera.length >= 3, true);
+check('카메라 후보에 디지털카메라', broadCamera.some((row) => row.goodsClNm === '디지털카메라'), true);
+check('드롭다운 20개 상한', broadCameraWide.length <= 20, true);
+check('20개가 12개보다 넓다', broadCameraWide.length > broadCamera.length, true);
 
 console.log('\n[속도]');
 const t = Date.now();

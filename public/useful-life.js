@@ -11,7 +11,7 @@ const USEFUL_LIFE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 // 대장 물품명이 고시 품명을 통째로 품고 있을 때만 자동 확정한다(실체현미경 SZ61 ⊃ 실체현미경).
 // 너무 짧거나 이름의 일부만 겹치면 회의자료 ⊃ 의자 같은 오탐이 생기므로 길이와 비율로 막는다
-const USEFUL_LIFE_MIN_CONTAIN_LEN = 3;
+const USEFUL_LIFE_MIN_CONTAIN_LEN = 2;
 const USEFUL_LIFE_MIN_CONTAIN_RATIO = 0.4;
 const USEFUL_LIFE_MAX_CANDIDATES = 12;
 const USEFUL_LIFE_MIN_SIMILARITY = 0.4;
@@ -19,6 +19,190 @@ const USEFUL_LIFE_MIN_SIMILARITY = 0.4;
 const USEFUL_LIFE_MAX_KEY_LEN = 40;
 // 만료 1년 전부터 임박으로 본다. 교체 예산을 다음 해에 잡아야 하기 때문이다
 const USEFUL_LIFE_DUE_SOON_DAYS = 365;
+const USEFUL_LIFE_SEARCH_LIMIT = 20;
+const USEFUL_LIFE_EXPAND_LIMIT = 24;
+
+// 현장에서 자주 쓰는 약칭/영문 → 나라장터 정식 품명(자동 확정). 값은 normalize 전 표기이며 표에 있어야 한다.
+const USEFUL_LIFE_SYNONYMS = {
+    '노트북': '노트북컴퓨터',
+    '노트북pc': '노트북컴퓨터',
+    '노트북피씨': '노트북컴퓨터',
+    '랩탑': '노트북컴퓨터',
+    '랩톱': '노트북컴퓨터',
+    'laptop': '노트북컴퓨터',
+    'notebook': '노트북컴퓨터',
+    'notebookpc': '노트북컴퓨터',
+    '데스크탑': '데스크톱컴퓨터',
+    '데스크톱': '데스크톱컴퓨터',
+    '데스크탑컴퓨터': '데스크톱컴퓨터',
+    '데스크탑pc': '데스크톱컴퓨터',
+    'desktop': '데스크톱컴퓨터',
+    'desktoppc': '데스크톱컴퓨터',
+    'pc본체': '데스크톱컴퓨터',
+    '본체': '데스크톱컴퓨터',
+    '빔프로젝터': '비디오프로젝터',
+    '빔프로젝타': '비디오프로젝터',
+    '프로젝타': '비디오프로젝터',
+    '프로젝터기': '비디오프로젝터',
+    'beamprojector': '비디오프로젝터',
+    'projector': '비디오프로젝터',
+    '팩스': '팩스기기',
+    '팩스기': '팩스기기',
+    '팩시밀리': '팩스기기',
+    'fax': '팩스기기',
+    'facsimile': '팩스기기',
+    '승용차': '승용자동차',
+    'sedan': '승용자동차',
+    '서버': '컴퓨터서버',
+    '서버컴퓨터': '컴퓨터서버',
+    'server': '컴퓨터서버',
+    'lcd모니터': 'LCD패널또는모니터',
+    '엘시디모니터': 'LCD패널또는모니터',
+    'lcdmonitor': 'LCD패널또는모니터',
+    'led모니터': 'LCD패널또는모니터',
+    'ledmonitor': 'LCD패널또는모니터',
+    '에어컨': '냉방기',
+    '에어콘': '냉방기',
+    '에어콘디셔너': '냉방기',
+    'airconditioner': '냉방기',
+    'aircon': '냉방기',
+    '레이저프린트': '레이저프린터',
+    '레이져프린터': '레이저프린터',
+    'laserprinter': '레이저프린터',
+    '파티션': '패널시스템용칸막이',
+    'partition': '패널시스템용칸막이',
+    'officepartition': '패널시스템용칸막이',
+    '칸막이파티션': '패널시스템용칸막이',
+    '화이트보드': '화이트보드',
+    'whiteboard': '화이트보드',
+    '복사기': '복사기',
+    'copier': '복사기',
+    'photocopier': '복사기',
+    '스캐너': '스캐너',
+    'scanner': '스캐너',
+    '공기청정기': '공기청정기',
+    'airpurifier': '공기청정기',
+    '정수기': '정수기',
+    'waterpurifier': '정수기'
+};
+
+// 토큰 단위 영↔한 / 유사어 치환. 자동 확정하지 않고 질의어를 늘려 후보를 넓힌다.
+const USEFUL_LIFE_TOKEN_MAP = {
+    laptop: ['노트북', '노트북컴퓨터'],
+    notebook: ['노트북', '노트북컴퓨터'],
+    desktop: ['데스크톱', '데스크톱컴퓨터', '데스크탑'],
+    computer: ['컴퓨터'],
+    pc: ['컴퓨터', '데스크톱컴퓨터'],
+    monitor: ['모니터', '영상모니터', 'LCD패널또는모니터'],
+    display: ['모니터', '영상모니터'],
+    projector: ['프로젝터', '비디오프로젝터'],
+    printer: ['프린터', '레이저프린터'],
+    copier: ['복사기'],
+    scanner: ['스캐너'],
+    server: ['서버', '컴퓨터서버'],
+    fax: ['팩스', '팩스기기'],
+    facsimile: ['팩스기기'],
+    refrigerator: ['냉장고', '대형냉장고', '김치냉장고'],
+    fridge: ['냉장고', '대형냉장고'],
+    freezer: ['냉동고', '실험실용일반냉장고또는냉동고'],
+    airconditioner: ['에어컨', '냉방기', '공기조화기'],
+    aircon: ['에어컨', '냉방기'],
+    partition: ['파티션', '칸막이', '패널시스템용칸막이'],
+    divider: ['칸막이', '패널시스템용칸막이'],
+    panel: ['패널', '패널시스템용칸막이'],
+    whiteboard: ['화이트보드'],
+    blackboard: ['칠판'],
+    desk: ['책상'],
+    table: ['탁자', '책상'],
+    chair: ['의자'],
+    sofa: ['소파'],
+    cabinet: ['캐비닛', '보관함'],
+    locker: ['사물함', '보관함'],
+    shelf: ['선반'],
+    '노트북': ['laptop', 'notebook', '노트북컴퓨터'],
+    '데스크탑': ['desktop', '데스크톱컴퓨터'],
+    '데스크톱': ['desktop', '데스크톱컴퓨터'],
+    '컴퓨터': ['computer', 'pc'],
+    '모니터': ['monitor', 'display', '영상모니터', 'LCD패널또는모니터'],
+    '프로젝터': ['projector', '비디오프로젝터'],
+    '프린터': ['printer', '레이저프린터'],
+    '복사기': ['copier'],
+    '스캐너': ['scanner'],
+    '서버': ['server', '컴퓨터서버'],
+    '팩스': ['fax', '팩스기기'],
+    '냉장고': ['refrigerator', 'fridge', '대형냉장고', '김치냉장고'],
+    '에어컨': ['airconditioner', 'aircon', '냉방기'],
+    '파티션': ['partition', '칸막이', '패널시스템용칸막이'],
+    '칸막이': ['partition', '파티션', '패널시스템용칸막이', '화장실칸막이'],
+    '화이트보드': ['whiteboard'],
+    '책상': ['desk', 'table'],
+    '의자': ['chair'],
+    '소파': ['sofa']
+};
+
+// 제품군 힌트 — 토큰이 보이면 대표 후보를 강제로 올려 준다(자동 확정은 하지 않음)
+const USEFUL_LIFE_FAMILIES = [
+    {
+        tokens: ['파티션', '칸막이', 'partition', 'divider'],
+        prefer: ['패널시스템용칸막이', '화장실칸막이', '패널시스템용보관함', '낮은칸막이가구또는놀이용패널', '칸막이형열람대']
+    },
+    {
+        tokens: ['모니터', 'monitor', 'display', 'lcd'],
+        prefer: ['LCD패널또는모니터', '영상모니터', 'CRT모니터', '오디오모니터']
+    },
+    {
+        tokens: ['프로젝터', 'projector', '빔프로젝'],
+        prefer: ['비디오프로젝터', '오버헤드프로젝터', '홀로그램프로젝터']
+    },
+    {
+        tokens: ['냉장고', 'refrigerator', 'fridge'],
+        prefer: ['대형냉장고', '김치냉장고', '의료용냉장고', '실험실용일반냉장고또는냉동고']
+    },
+    {
+        tokens: ['의자', 'chair'],
+        prefer: ['작업용의자', '미용의자', '라운지용의자', '이발용의자']
+    },
+    {
+        tokens: ['책상', 'desk'],
+        prefer: ['책상', '컴퓨터책상', '학생용책상', '제도용책상']
+    },
+    {
+        tokens: ['프린터', 'printer'],
+        prefer: ['레이저프린터', '업무용인쇄지열전도프린터', '점자프린터']
+    },
+    {
+        tokens: ['서버', 'server'],
+        prefer: ['컴퓨터서버', 'AI서버', '프린트서버']
+    },
+    {
+        tokens: ['에어컨', '냉방', 'aircon', 'airconditioner'],
+        prefer: ['냉방기', '공기조화기', '차량용냉방기', '증발냉방장치']
+    },
+    {
+        tokens: ['카메라', 'camera', '디카', '디지탈카메라', '디지털카메라'],
+        prefer: ['디지털카메라', '스틸카메라', '즉석카메라', '디지털캠코더또는비디오카메라', '웹카메라']
+    },
+    {
+        tokens: ['전화기', '전화', 'phone', 'telephone'],
+        prefer: ['유선전화기', '디지털전화기', 'IP전화기', '화상전화기', '휴대전화기', '공중전화기']
+    },
+    {
+        tokens: ['세단기', '파쇄', 'shredder'],
+        prefer: ['문서세단기및보조용품']
+    },
+    {
+        tokens: ['녹화', '녹화기', '녹음기', 'dvr'],
+        prefer: ['감시용녹화기또는녹음기', '개인용비디오녹화기PVR', '콤팩트디스크재생또는녹음기']
+    },
+    {
+        tokens: ['서랍', '서랍장', '파일서랍'],
+        prefer: ['이동형파일서랍', '서랍형수납장', '파일링캐비닛또는액세서리']
+    },
+    {
+        tokens: ['탁자', '테이블', 'table'],
+        prefer: ['응접탁자', '회의용탁자', '책상', '컴퓨터책상']
+    }
+];
 
 let usefulLifeTable = null;
 let usefulLifeByCode = null;
@@ -271,7 +455,137 @@ function candidateFrom(row, score, reason) {
 function sortUsefulLifeCandidates(list) {
     return list.sort((a, b) => (b.score - a.score)
         || (Number(b.notified) - Number(a.notified))
-        || (a.goodsClNm.length - b.goodsClNm.length));
+        || ((b.reason === 'family') - (a.reason === 'family'))
+        || ((b.reason === 'locale') - (a.reason === 'locale'))
+        || ((b.reason === 'synonym') - (a.reason === 'synonym'))
+        || (a.goodsClNm.length - b.goodsClNm.length)
+        || String(a.goodsClNo).localeCompare(String(b.goodsClNo)));
+}
+
+function resolveUsefulLifeSynonym(key) {
+    const mapped = USEFUL_LIFE_SYNONYMS[key];
+    if (!mapped || !usefulLifeByName) return null;
+    const targetKey = normalizeGoodsName(mapped);
+    const row = usefulLifeByName.get(targetKey);
+    return row ? { row, name: targetKey } : null;
+}
+
+// 영↔한·유사 토큰을 치환해 같은 물품을 여러 표기로 다시 찾는다
+function expandUsefulLifeKeys(itemName) {
+    const original = normalizeGoodsName(itemName);
+    if (!original) return [];
+
+    const keys = new Set([original]);
+    const tokenEntries = Object.keys(USEFUL_LIFE_TOKEN_MAP)
+        .map((token) => [token, normalizeGoodsName(token)])
+        .filter(([, norm]) => norm.length >= 2)
+        .sort((a, b) => b[1].length - a[1].length);
+
+    let wave = [original];
+    for (let depth = 0; depth < 2 && wave.length; depth += 1) {
+        const next = [];
+        wave.forEach((key) => {
+            tokenEntries.forEach(([token, normToken]) => {
+                if (!key.includes(normToken)) return;
+                (USEFUL_LIFE_TOKEN_MAP[token] || []).forEach((rep) => {
+                    const repKey = normalizeGoodsName(rep);
+                    if (!repKey) return;
+                    const replaced = key.split(normToken).join(repKey);
+                    if (replaced && !keys.has(replaced)) {
+                        keys.add(replaced);
+                        next.push(replaced);
+                    }
+                    if (!keys.has(repKey)) {
+                        keys.add(repKey);
+                        next.push(repKey);
+                    }
+                });
+            });
+        });
+        wave = next.slice(0, USEFUL_LIFE_EXPAND_LIMIT);
+        if (keys.size >= USEFUL_LIFE_EXPAND_LIMIT) break;
+    }
+
+    return [...keys].slice(0, USEFUL_LIFE_EXPAND_LIMIT);
+}
+
+function findFamilyCandidates(itemName, key, limit) {
+    if (!usefulLifeByName) return [];
+    const haystack = `${normalizeGoodsName(itemName)} ${key}`;
+    const hits = [];
+
+    USEFUL_LIFE_FAMILIES.forEach((family) => {
+        const matched = (family.tokens || []).some((token) => {
+            const norm = normalizeGoodsName(token);
+            return norm && haystack.includes(norm);
+        });
+        if (!matched) return;
+
+        (family.prefer || []).forEach((name, index) => {
+            const row = usefulLifeByName.get(normalizeGoodsName(name));
+            if (!row) return;
+            // 앞에 적은 대표 후보일수록 점수를 조금 더 준다
+            hits.push(candidateFrom(row, 0.78 - index * 0.03, 'family'));
+        });
+
+        // 토큰이 이름에 들어간 표 항목도 소량 보강
+        (family.tokens || []).forEach((token) => {
+            const norm = normalizeGoodsName(token);
+            if (!norm || norm.length < 2) return;
+            usefulLifeTable.normNames.forEach((name, rowIndex) => {
+                if (!name.includes(norm) || name === key) return;
+                hits.push(candidateFrom(
+                    usefulLifeTable.rows[rowIndex],
+                    Math.min(0.7, norm.length / Math.max(name.length, 1)),
+                    'family'
+                ));
+            });
+        });
+    });
+
+    return sortUsefulLifeCandidates(dedupeUsefulLifeCandidates(hits)).slice(0, Number(limit) || USEFUL_LIFE_MAX_CANDIDATES);
+}
+
+function usefulLifeDetailText(row) {
+    return String((row && row[3]) || '');
+}
+
+// 직접 검색용 — 품명·분류번호·설명문(있으면)을 느슨하게 찾는다
+function searchUsefulLifeClasses(query, limit) {
+    if (!usefulLifeTable) return [];
+    const raw = String(query || '').trim();
+    const key = normalizeGoodsName(raw);
+    const codeKey = raw.replace(/\D/g, '');
+    if (!key && codeKey.length < 4) return [];
+
+    const max = Math.max(1, Number(limit) || USEFUL_LIFE_SEARCH_LIMIT);
+    const hits = [];
+    usefulLifeTable.rows.forEach((row, index) => {
+        const name = usefulLifeTable.normNames[index];
+        const code = String(row[0] || '');
+        const detail = normalizeGoodsName(usefulLifeDetailText(row));
+        let score = 0;
+        if (key) {
+            if (name === key) score = 1;
+            else if (name.startsWith(key)) score = 0.92;
+            else if (name.includes(key)) score = 0.75 * (key.length / Math.max(name.length, 1));
+            else if (detail.includes(key)) score = 0.55;
+        }
+        if (codeKey && code.startsWith(codeKey)) score = Math.max(score, 0.88);
+        if (score <= 0) return;
+        hits.push(candidateFrom(row, score, 'search'));
+    });
+    return sortUsefulLifeCandidates(hits).slice(0, max);
+}
+
+function dedupeUsefulLifeCandidates(list) {
+    const seen = new Set();
+    return list.filter((item) => {
+        const id = item.goodsClNo;
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+    });
 }
 
 // 대장 물품명이 고시 품명을 품는 경우. 가장 긴 것 하나만 남으면 자동 확정 후보가 된다.
@@ -308,7 +622,9 @@ function findContainingNames(key) {
     return hits;
 }
 
-function findSimilarNames(key) {
+function findSimilarNames(key, options = {}) {
+    const minScore = Number(options.minScore) || USEFUL_LIFE_MIN_SIMILARITY;
+    const limit = Number(options.limit) || USEFUL_LIFE_MAX_CANDIDATES;
     const { grams, shared } = usefulLifeBigramHits(key);
     // 글자쌍이 둘뿐인 짧은 이름은 비슷함을 따져 봐야 무전기 → 전기로 같은 오답만 나온다
     if (grams.size < 3) return [];
@@ -320,11 +636,63 @@ function findSimilarNames(key) {
         const size = Math.max(1, usefulLifeTable.normNames[rowIndex].length - 1);
         // Dice 계수 — 짧은 이름이 무조건 유리해지지 않게 양쪽 길이를 함께 본다
         const score = (2 * common) / (grams.size + size);
-        if (score >= USEFUL_LIFE_MIN_SIMILARITY) {
+        if (score >= minScore) {
             hits.push(candidateFrom(usefulLifeTable.rows[rowIndex], score, 'similar'));
         }
     });
-    return sortUsefulLifeCandidates(hits).slice(0, USEFUL_LIFE_MAX_CANDIDATES);
+    return sortUsefulLifeCandidates(hits).slice(0, limit);
+}
+
+// 엑셀 드롭다운용. 자동 확정은 건드리지 않고, 유사 표기·제품군·비슷한 이름을 최대 20개까지 모은다.
+function collectUsefulLifeBroadCandidates(itemName, limit) {
+    const max = Math.max(1, Number(limit) || 20);
+    if (!usefulLifeTable) return [];
+    const key = normalizeGoodsName(itemName);
+    if (!key) return [];
+
+    const hits = [];
+    const pushRow = (row, score, reason) => {
+        if (row) hits.push(candidateFrom(row, score, reason));
+    };
+
+    pushRow(usefulLifeByName.get(key), 1, 'exact');
+    const synonym = resolveUsefulLifeSynonym(key);
+    if (synonym) pushRow(synonym.row, 0.97, 'synonym');
+
+    const expanded = expandUsefulLifeKeys(itemName);
+    expanded.forEach((alt) => {
+        if (!alt || alt === key) return;
+        pushRow(usefulLifeByName.get(alt), 0.9, 'locale');
+        const altSynonym = resolveUsefulLifeSynonym(alt);
+        if (altSynonym) pushRow(altSynonym.row, 0.88, 'locale');
+        findContainedNames(alt).slice(0, 8).forEach((hit) => {
+            pushRow(hit.row, 0.8, 'contains');
+        });
+    });
+
+    findContainedNames(key).forEach((hit) => {
+        pushRow(hit.row, hit.name.length / Math.max(key.length, hit.name.length), 'contains');
+    });
+    findFamilyCandidates(itemName, key, max).forEach((hit) => hits.push(hit));
+    findContainingNames(key).forEach((hit) => {
+        pushRow(hit.row, key.length / Math.max(hit.name.length, 1), 'partial');
+    });
+
+    // 짧은 이름은 기준을 유지하고, 네 글자 이상만 비슷함을 조금 더 허용한다
+    const similarFloor = key.length >= 4 ? 0.26 : USEFUL_LIFE_MIN_SIMILARITY;
+    findSimilarNames(key, { minScore: similarFloor, limit: max }).forEach((hit) => hits.push(hit));
+    expanded.slice(0, 6).forEach((alt) => {
+        if (!alt || alt === key || alt.length < 3) return;
+        findSimilarNames(alt, { minScore: Math.max(similarFloor, 0.3), limit: 8 }).forEach((hit) => {
+            hits.push({ ...hit, score: Math.min(0.84, (hit.score || 0) + 0.04), reason: 'locale' });
+        });
+        findContainingNames(alt).slice(0, 6).forEach((hit) => {
+            pushRow(hit.row, alt.length / Math.max(hit.name.length, 1), 'locale');
+        });
+    });
+    searchUsefulLifeClasses(itemName, max).forEach((hit) => hits.push(hit));
+
+    return sortUsefulLifeCandidates(dedupeUsefulLifeCandidates(hits)).slice(0, max);
 }
 
 function usefulLifeVerdict(entry, candidates) {
@@ -368,34 +736,100 @@ function matchUsefulLife(input) {
         if (byAlias) return usefulLifeMatchResult({ ...byAlias, match: 'alias' }, [], true);
     }
 
-    // 3. 정확 일치. 정규화 품명은 유일하고 연수 충돌이 없어 애매함이 없다
+    // 3. 정확 일치
     const exact = usefulLifeByName.get(key);
     if (exact) return usefulLifeMatchResult(usefulLifeEntry(exact, 'exact'), [], true);
 
-    // 4. 물품명이 고시 품명을 품는 경우. 가장 긴 것이 하나뿐이면 확정한다
-    const contained = findContainedNames(key);
+    // 4. 현장 약칭/영문 동의어 → 정식 품명
+    const synonym = resolveUsefulLifeSynonym(key);
+    if (synonym) {
+        return usefulLifeMatchResult(usefulLifeEntry(synonym.row, 'synonym'), [], true);
+    }
+
+    // 5. 영↔한·유사 토큰으로 늘린 질의어
+    // 영문 질의는 한글 정식명으로 자동 확정하고, 한글 일반명→세부명 확장은 후보만 올린다
+    const expandedKeys = expandUsefulLifeKeys(source.itemName);
+    const mostlyLatin = /^[a-z0-9]+$/.test(key);
+    const localeCandidates = [];
+    for (let i = 0; i < expandedKeys.length; i += 1) {
+        const alt = expandedKeys[i];
+        if (!alt || alt === key) continue;
+        const altSynonym = resolveUsefulLifeSynonym(alt);
+        if (altSynonym && mostlyLatin) {
+            return usefulLifeMatchResult(usefulLifeEntry(altSynonym.row, 'locale'), [], true);
+        }
+        const altExact = usefulLifeByName.get(alt);
+        if (altExact) {
+            if (mostlyLatin) {
+                return usefulLifeMatchResult(usefulLifeEntry(altExact, 'locale'), [], true);
+            }
+            localeCandidates.push(candidateFrom(altExact, 0.86, 'locale'));
+        } else if (altSynonym) {
+            localeCandidates.push(candidateFrom(altSynonym.row, 0.84, 'locale'));
+        }
+    }
+
+    // 6. 물품명이 고시 품명을 품는 경우 (원문 + 확장 질의)
+    let contained = findContainedNames(key);
+    expandedKeys.forEach((alt) => {
+        if (!alt || alt === key) return;
+        contained = contained.concat(findContainedNames(alt).map((hit) => ({
+            ...hit,
+            scoreBoost: 0.05
+        })));
+    });
+    // 확장 질의로 같은 품명이 여러 번 잡히면 최장 유일 판정이 깨지므로 이름 기준으로 묶는다
     if (contained.length) {
+        const byName = new Map();
+        contained.forEach((hit) => {
+            const prev = byName.get(hit.name);
+            if (!prev || (hit.scoreBoost || 0) > (prev.scoreBoost || 0)) byName.set(hit.name, hit);
+        });
+        contained = [...byName.values()];
         const longest = Math.max(...contained.map((hit) => hit.name.length));
         const top = contained.filter((hit) => hit.name.length === longest);
-        const candidates = sortUsefulLifeCandidates(
-            contained.map((hit) => candidateFrom(hit.row, hit.name.length / key.length, 'contains'))
-        ).slice(0, USEFUL_LIFE_MAX_CANDIDATES);
+        const candidates = sortUsefulLifeCandidates(dedupeUsefulLifeCandidates([
+            ...contained.map((hit) => candidateFrom(
+                hit.row,
+                (hit.name.length / Math.max(key.length, hit.name.length)) + (hit.scoreBoost || 0),
+                'contains'
+            )),
+            ...localeCandidates
+        ])).slice(0, USEFUL_LIFE_MAX_CANDIDATES);
         if (top.length === 1 && longest / key.length >= USEFUL_LIFE_MIN_CONTAIN_RATIO) {
             return usefulLifeMatchResult(usefulLifeEntry(top[0].row, 'contains'), candidates, true);
         }
         return usefulLifeMatchResult(null, candidates, false);
     }
 
-    // 5. 고시 품명이 물품명을 품는 경우. 연수가 갈리므로 후보만 내놓는다
+    // 7. 제품군 후보 + 부분포함 + 유사어 (확장 질의 포함)
+    const family = findFamilyCandidates(source.itemName, key);
     const containing = findContainingNames(key);
-    if (containing.length) {
-        return usefulLifeMatchResult(null, sortUsefulLifeCandidates(
-            containing.map((hit) => candidateFrom(hit.row, key.length / hit.name.length, 'partial'))
-        ).slice(0, USEFUL_LIFE_MAX_CANDIDATES), false);
+    const similar = findSimilarNames(key);
+    const localePartial = [];
+    expandedKeys.slice(0, 8).forEach((alt) => {
+        if (!alt || alt === key) return;
+        findContainingNames(alt).forEach((hit) => {
+            localePartial.push(candidateFrom(hit.row, alt.length / hit.name.length, 'locale'));
+        });
+        findSimilarNames(alt).slice(0, 4).forEach((hit) => {
+            localePartial.push({ ...hit, reason: 'locale', score: Math.min(0.9, (hit.score || 0) + 0.05) });
+        });
+    });
+
+    const merged = dedupeUsefulLifeCandidates([
+        ...family,
+        ...localeCandidates,
+        ...containing.map((hit) => candidateFrom(hit.row, key.length / hit.name.length, 'partial')),
+        ...similar,
+        ...localePartial
+    ]).slice(0, USEFUL_LIFE_MAX_CANDIDATES);
+
+    if (merged.length) {
+        return usefulLifeMatchResult(null, sortUsefulLifeCandidates(merged), false);
     }
 
-    // 6. 마지막으로 글자쌍이 비슷한 것들
-    return usefulLifeMatchResult(null, findSimilarNames(key), false);
+    return usefulLifeMatchResult(null, [], false);
 }
 
 function isoDateKey(date) {
@@ -479,6 +913,7 @@ function describeUsefulLife(input, today) {
     return {
         verdict: match.verdict,
         auto: match.auto,
+        entry: entry || null,
         candidates: match.candidates,
         goodsClNo: entry ? entry.goodsClNo : '',
         goodsClNm: entry ? entry.goodsClNm : '',

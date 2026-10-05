@@ -121,12 +121,19 @@ async function main() {
 
     const seen = new Set();
     const rows = [];
+// 설명문이 스냅샷에 있으면(row[3]) 검색에 쓰고, 없으면 품명만으로도 동작한다
     all.forEach((row) => {
         const no = String(row.goodsClNo || '').trim();
         const nm = String(row.goodsClNm || '').trim();
         if (!no || !nm || seen.has(no)) return;
         seen.add(no);
-        rows.push([no, nm, gosiYears.get(no) || 0]);
+        const detail = String(row.goodsClDetail || '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 120);
+        const years = gosiYears.get(no) || 0;
+        rows.push(detail ? [no, nm, years, detail] : [no, nm, years]);
     });
     rows.sort((a, b) => a[0].localeCompare(b[0]));
 

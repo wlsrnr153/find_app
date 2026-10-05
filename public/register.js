@@ -105,7 +105,8 @@ const REGISTER_LEAN_KEYS = [
     'id', 'surveyId', 'surveyName', 'status', 'createdBy', 'createdAt', 'sourceFile',
     'checkedBy', 'checkedByEmail', 'checkedAt', 'itemId', 'foundItemId',
     'assetNumber', 'itemName', 'organization', 'location', 'building', 'floor', 'room',
-    'category', 'goodsClNo', 'quantity', 'acquiredAt', 'manufacturer', 'model', 'condition'
+    'category', 'goodsClNo', 'goodsClNm', 'usefulLife', 'usefulLifeMatch',
+    'quantity', 'acquiredAt', 'manufacturer', 'model', 'condition'
 ];
 
 function leanRegisterRecord(row) {
@@ -281,6 +282,31 @@ async function saveRegistersForSurvey(surveyId, rows) {
     }
 }
 
+async function patchRegisterInChunks(surveyId, patchesById) {
+    if (!surveyId || !currentUser) return 0;
+    const metaSnap = await db.collection('users').doc(currentUser.uid).get();
+    const count = metaSnap.data()?.registerChunkMeta?.[surveyId]?.count || 0;
+    if (!count) return 0;
+
+    let updated = 0;
+    for (let i = 0; i < count; i += 1) {
+        const ref = db.collection('registerChunks').doc(`${surveyId}_${i}`);
+        const snap = await ref.get();
+        const list = snap.data()?.rows || [];
+        let changed = false;
+        const next = list.map((record) => {
+            const patch = patchesById.get(record.id);
+            if (!patch) return record;
+            changed = true;
+            updated += 1;
+            return { ...record, ...patch };
+        });
+        if (changed) await ref.set({ rows: next }, { merge: true });
+        if (updated >= patchesById.size) break;
+    }
+    return updated;
+}
+
 async function updateRegisterRecord(registerId, patch) {
     const current = registerItems.find((record) => record.id === registerId);
     if (current) {
@@ -289,37 +315,15 @@ async function updateRegisterRecord(registerId, patch) {
         )));
     }
 
-    try {
-        const snapshot = await db.collection('users').get();
-        for (const doc of snapshot.docs) {
-            const data = doc.data() || {};
-            for (const key of registerFieldKeys(data)) {
-                const list = Array.isArray(data[key]) ? data[key] : [];
-                const index = list.findIndex((record) => record.id === registerId);
-                if (index === -1) continue;
-                const next = [...list];
-                next[index] = { ...next[index], ...patch };
-                await doc.ref.set({ [key]: next }, { merge: true });
-                return;
-            }
-        }
-    } catch (error) {
-        console.warn('사용자 문서 대장 수정 실패:', error);
-    }
-
+    // 대용량 대장은 registerChunks에만 있다. users 전체 get보다 청크를 먼저 본다.
     if (current?.surveyId) {
         try {
-            const metaSnap = await db.collection('users').doc(currentUser.uid).get();
-            const count = metaSnap.data()?.registerChunkMeta?.[current.surveyId]?.count || 0;
-            for (let i = 0; i < count; i += 1) {
-                const ref = db.collection('registerChunks').doc(`${current.surveyId}_${i}`);
-                const snap = await ref.get();
-                const list = snap.data()?.rows || [];
-                const index = list.findIndex((record) => record.id === registerId);
-                if (index === -1) continue;
-                const next = [...list];
-                next[index] = { ...next[index], ...patch };
-                await ref.set({ rows: next }, { merge: true });
+            const patched = await patchRegisterInChunks(
+                current.surveyId,
+                new Map([[registerId, patch]])
+            );
+            if (patched) {
+                try { await idbUpdateRegister(registerId, patch); } catch (_) { /* ignore */ }
                 return;
             }
         } catch (error) {
@@ -327,8 +331,78 @@ async function updateRegisterRecord(registerId, patch) {
         }
     }
 
-    await idbUpdateRegister(registerId, patch);
+    try {
+        const ownRef = currentUser ? db.collection('users').doc(currentUser.uid) : null;
+        if (ownRef) {
+            const ownSnap = await ownRef.get();
+            const data = ownSnap.data() || {};
+            for (const key of registerFieldKeys(data)) {
+                const list = Array.isArray(data[key]) ? data[key] : [];
+                const index = list.findIndex((record) => record.id === registerId);
+                if (index === -1) continue;
+                const next = [...list];
+                next[index] = { ...next[index], ...patch };
+                await ownRef.set({ [key]: next }, { merge: true });
+                try { await idbUpdateRegister(registerId, patch); } catch (_) { /* ignore */ }
+                return;
+            }
+        }
+    } catch (error) {
+        console.warn('사용자 문서 대장 수정 실패:', error);
+    }
+
+    try {
+        await idbUpdateRegister(registerId, patch);
+    } catch (error) {
+        console.warn('로컬 대장 수정 실패:', error);
+    }
 }
+
+// 엑셀 일괄 반영용 — 같은 회차 청크를 한 번씩만 읽고 쓴다
+async function updateRegisterRecordsBulk(entries) {
+    if (!Array.isArray(entries) || !entries.length) return { updated: 0 };
+
+    const bySurvey = new Map();
+    const memoryPatches = new Map();
+    entries.forEach(({ registerId, patch }) => {
+        if (!registerId || !patch) return;
+        memoryPatches.set(registerId, patch);
+        const current = registerItems.find((record) => record.id === registerId);
+        const surveyId = current?.surveyId || '';
+        if (!bySurvey.has(surveyId)) bySurvey.set(surveyId, new Map());
+        bySurvey.get(surveyId).set(registerId, patch);
+    });
+
+    if (memoryPatches.size) {
+        setRegisterItems(registerItems.map((record) => (
+            memoryPatches.has(record.id) ? { ...record, ...memoryPatches.get(record.id) } : record
+        )));
+    }
+
+    let firestoreHits = 0;
+    for (const [surveyId, patchesById] of bySurvey.entries()) {
+        if (surveyId) {
+            try {
+                firestoreHits += await patchRegisterInChunks(surveyId, patchesById);
+            } catch (error) {
+                console.warn('분할 대장 일괄 수정 실패:', error);
+            }
+        } else {
+            for (const [registerId, patch] of patchesById.entries()) {
+                await updateRegisterRecord(registerId, patch);
+                firestoreHits += 1;
+            }
+        }
+    }
+
+    for (const [registerId, patch] of memoryPatches.entries()) {
+        try { await idbUpdateRegister(registerId, patch); } catch (_) { /* ignore */ }
+    }
+
+    return { updated: memoryPatches.size, firestoreHits };
+}
+
+window.updateRegisterRecordsBulk = updateRegisterRecordsBulk;
 
 let unsubscribeRegisterChunks = null;
 
@@ -387,12 +461,17 @@ function applyRegisterToForm(record) {
     setValue('manufacturer', record.manufacturer);
     setValue('model', record.model);
     setValue('condition', record.condition);
+    setValue('acquiredAt', record.acquiredAt);
+    setValue('goodsClNo', record.goodsClNo);
+    setValue('goodsClNm', record.goodsClNm);
+    if (record.usefulLife) setValue('usefulLife', record.usefulLife);
     if (record.organization && typeof selectOrganization === 'function') {
         const orgSelect = document.getElementById('organizationSelect');
         if (orgSelect) orgSelect.value = record.organization;
         currentOrganization = record.organization;
     }
     if (typeof updateLocationPreview === 'function') updateLocationPreview();
+    if (typeof refreshUsefulLifeUi === 'function') refreshUsefulLifeUi({ force: true });
 }
 
 function updateAssetCheckBanner() {
@@ -999,6 +1078,14 @@ async function confirmRegisterMapping() {
             showToast(`${pending.survey.name} 대장 ${records.length}건을 열 매핑 후 가져왔습니다`, 'success');
         }
         refreshRegisterViews();
+        if (typeof switchTab === 'function' && records.length) {
+            // 대장 올린 직후 내용연수 탭으로 안내
+            setTimeout(() => {
+                if (confirm(`대장 ${records.length}건을 가져왔습니다.\n내용연수 분석 탭으로 이동할까요?`)) {
+                    switchTab('usefullife');
+                }
+            }, 300);
+        }
     } catch (error) {
         console.error('대장 저장 실패:', error);
         showToast('대장 저장에 실패했습니다. 파일이 매우 크면 잠시 후 다시 시도해 주세요', 'error');
@@ -1266,6 +1353,10 @@ function refreshRegisterViews() {
     updateRegisterDashboard(surveyedIndex);
     updateRegisterList({ preserveWindow: true, surveyedIndex });
     updateAssetCheckBanner();
+    if (typeof refreshUsefulLifeRegisterTab === 'function'
+        && document.getElementById('usefullife')?.classList.contains('active')) {
+        refreshUsefulLifeRegisterTab();
+    }
 }
 
 async function startAssetScan() {

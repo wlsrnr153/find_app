@@ -1,4 +1,4 @@
-const CACHE_NAME = 'find-app-shell-v5';
+const CACHE_NAME = 'find-app-shell-v16';
 const APP_SHELL = [
     '/index.html',
     '/login.html',
@@ -8,6 +8,9 @@ const APP_SHELL = [
     '/masters.js',
     '/register.js',
     '/useful-life.js',
+    '/useful-life-ui.js',
+    '/useful-life-excel.js',
+    '/useful-life-register.js',
     '/offline-queue.js',
     '/firebase-config.js',
     '/manifest.json',
@@ -42,7 +45,7 @@ self.addEventListener('fetch', (event) => {
 
     const url = new URL(request.url);
     const isAppShell = url.origin === self.location.origin;
-    const isCdn = /gstatic\.com|cdnjs\.cloudflare\.com|unpkg\.com/.test(url.hostname);
+    const isCdn = /gstatic\.com|cdnjs\.cloudflare\.com|unpkg\.com|jsdelivr\.net/.test(url.hostname);
     if (!isAppShell && !isCdn) return;
 
     const preferNetwork = request.mode === 'navigate'
