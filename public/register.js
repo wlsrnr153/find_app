@@ -282,16 +282,43 @@ async function saveRegistersForSurvey(surveyId, rows) {
     }
 }
 
-async function patchRegisterInChunks(surveyId, patchesById) {
+async function resolveRegisterChunkCount(surveyId) {
     if (!surveyId || !currentUser) return 0;
-    const metaSnap = await db.collection('users').doc(currentUser.uid).get();
-    const count = metaSnap.data()?.registerChunkMeta?.[surveyId]?.count || 0;
+    try {
+        const metaSnap = await db.collection('users').doc(currentUser.uid).get();
+        const metaCount = metaSnap.data()?.registerChunkMeta?.[surveyId]?.count || 0;
+        if (metaCount) return metaCount;
+    } catch (error) {
+        console.warn('대장 청크 메타 조회 실패:', error);
+    }
+
+    // 메타가 없거나 다른 계정 업로드분이면 문서를 직접 센다
+    try {
+        const snap = await db.collection('registerChunks').where('surveyId', '==', surveyId).get();
+        if (!snap.empty) return snap.size;
+    } catch (error) {
+        console.warn('대장 청크 조회 실패, 순차 탐색:', error);
+        let count = 0;
+        while (count < 500) {
+            const doc = await db.collection('registerChunks').doc(`${surveyId}_${count}`).get();
+            if (!doc.exists) break;
+            count += 1;
+        }
+        return count;
+    }
+    return 0;
+}
+
+async function patchRegisterInChunks(surveyId, patchesById) {
+    if (!surveyId || !currentUser || !patchesById?.size) return 0;
+    const count = await resolveRegisterChunkCount(surveyId);
     if (!count) return 0;
 
     let updated = 0;
     for (let i = 0; i < count; i += 1) {
         const ref = db.collection('registerChunks').doc(`${surveyId}_${i}`);
         const snap = await ref.get();
+        if (!snap.exists) continue;
         const list = snap.data()?.rows || [];
         let changed = false;
         const next = list.map((record) => {
@@ -303,6 +330,34 @@ async function patchRegisterInChunks(surveyId, patchesById) {
         });
         if (changed) await ref.set({ rows: next }, { merge: true });
         if (updated >= patchesById.size) break;
+    }
+    return updated;
+}
+
+/** users.registers / registerChunk_* 배열에 들어 있는 소량 대장을 일괄 수정 */
+async function patchRegisterInUserDocs(patchesById) {
+    if (!currentUser || !patchesById?.size) return 0;
+    const ownRef = db.collection('users').doc(currentUser.uid);
+    const ownSnap = await ownRef.get();
+    const data = ownSnap.data() || {};
+    let updated = 0;
+    const update = {};
+
+    for (const key of registerFieldKeys(data)) {
+        const list = Array.isArray(data[key]) ? data[key] : [];
+        let changed = false;
+        const next = list.map((record) => {
+            const patch = patchesById.get(record.id);
+            if (!patch) return record;
+            changed = true;
+            updated += 1;
+            return { ...record, ...patch };
+        });
+        if (changed) update[key] = next;
+    }
+
+    if (Object.keys(update).length) {
+        await ownRef.set(update, { merge: true });
     }
     return updated;
 }
@@ -381,18 +436,31 @@ async function updateRegisterRecordsBulk(entries) {
 
     let firestoreHits = 0;
     for (const [surveyId, patchesById] of bySurvey.entries()) {
+        let hits = 0;
         if (surveyId) {
             try {
-                firestoreHits += await patchRegisterInChunks(surveyId, patchesById);
+                hits = await patchRegisterInChunks(surveyId, patchesById);
             } catch (error) {
                 console.warn('분할 대장 일괄 수정 실패:', error);
             }
-        } else {
-            for (const [registerId, patch] of patchesById.entries()) {
-                await updateRegisterRecord(registerId, patch);
-                firestoreHits += 1;
+        }
+        // 청크 메타 없음·소량 대장(users.registers)이면 사용자 문서로 폴백
+        if (hits < patchesById.size) {
+            try {
+                const userHits = await patchRegisterInUserDocs(patchesById);
+                hits = Math.max(hits, userHits);
+            } catch (error) {
+                console.warn('사용자 문서 대장 일괄 수정 실패:', error);
             }
         }
+        // 그래도 부족하면 건별 저장(청크/문서/로컬 경로를 모두 탄다)
+        if (hits < patchesById.size) {
+            for (const [registerId, patch] of patchesById.entries()) {
+                await updateRegisterRecord(registerId, patch);
+                hits += 1;
+            }
+        }
+        firestoreHits += hits;
     }
 
     for (const [registerId, patch] of memoryPatches.entries()) {
@@ -538,7 +606,9 @@ async function confirmAssetDuplicate() {
 
 const REGISTER_SYSTEM_FIELDS = [
     { key: 'assetNumber', label: '자산번호', required: true, aliases: ['자산번호', '관리번호', '자산no', '자산코드', '자산id', '식별번호', 'rfid번호', '태그', '바코드', '일련번호', 'asset', 'tag', 'barcode'] },
-    { key: 'itemName', label: '물품명', required: true, aliases: ['자산명', '물품명', '품명', '물품', '명칭', '품목명', '품목', 'name', 'item'] },
+    // 자산명=현장 표기, 품명=대장 분류명. 둘 다 있어야 사람이 분류를 가릴 수 있다
+    { key: 'itemName', label: '물품명', required: true, aliases: ['자산명', '물품명', '물품', '명칭', '품목명', '품목', 'name', 'item'] },
+    { key: 'goodsClNm', label: '분류명', aliases: ['품명', '분류명', '물품분류명', '세부품명', '고시품명', '물품분류', 'goodsclnm', 'classname'] },
     { key: 'organization', label: '기관명', aliases: ['기관명', '기관', '조사부서', '소속', '부서', '관리부서', '사용부서', 'organization'] },
     { key: 'location', label: '사용위치', aliases: ['사용위치', '현 사용위치', '위치', '설치위치', '보관위치', '장소', 'location'] },
     { key: 'building', label: '건물', aliases: ['건물', '동', '건물명', '단과대학', 'building'] },
@@ -546,11 +616,12 @@ const REGISTER_SYSTEM_FIELDS = [
     { key: 'room', label: '실/호', aliases: ['실', '호', '호실', '실명', '학과', 'room'] },
     // 카테고리보다 먼저 둬야 전용 분류번호 열을 이쪽이 가져간다
     { key: 'goodsClNo', label: '물품분류번호', aliases: ['물품분류번호', '세부품명번호', '품명번호', '분류번호', '물품코드', 'goodsclno'] },
-    { key: 'category', label: '카테고리', aliases: ['카테고리', '계정과목명', '분류번호', '분류', '품목분류', '자산분류', '계정', 'category'] },
+    { key: 'category', label: '계정과목', aliases: ['계정과목명', '계정과목', '카테고리', '분류', '품목분류', '자산분류', '계정', 'category'] },
     { key: 'quantity', label: '갯수', aliases: ['취득수량', '갯수', '수량', '수량(개)', 'qty', 'quantity'] },
     { key: 'acquiredAt', label: '취득일자', aliases: ['취득일자', '취득년월일', '취득일', '취득년월', '구입일자', '구입일', '구매일자', '구매일', '등록일자', 'acquired', 'acquisitiondate'] },
+    { key: 'usefulLife', label: '내용연수', aliases: ['내용연수', '내용연수(년)', '내용년수', '내용년수(년)', 'usefulife', 'usefullife', 'life'] },
     { key: 'manufacturer', label: '제조사', aliases: ['제조사', '제작사', '메이커', '브랜드', 'manufacturer'] },
-    { key: 'model', label: '모델명', aliases: ['모델명', '모델', '규격', '사양', 'model'] },
+    { key: 'model', label: '규격', aliases: ['규격', '모델명', '모델', '사양', '규격및모델', 'model'] },
     { key: 'condition', label: '상태', aliases: ['상태', '물품상태', '현재상태', '보유여부', 'condition'] }
 ];
 
@@ -840,11 +911,26 @@ function applyRegisterMapping(rows, mapping) {
             mapped.location = [mapped.building, mapped.floor, mapped.room].filter(Boolean).join(' ');
         }
         if (!mapped.quantity) mapped.quantity = '1';
+        // 품명만 있고 자산명이 비면 물품명으로 쓴다. 반대는 하지 않아 두 정보를 지킨다
+        if (!mapped.itemName && mapped.goodsClNm) mapped.itemName = mapped.goodsClNm;
         const rawGoodsCl = mapped.goodsClNo;
         mapped.goodsClNo = normalizeGoodsClNo(rawGoodsCl);
         // 분류번호 열을 goodsClNo가 가져가도 기존 분류 표시가 비지 않게 한다
         if (!mapped.category && rawGoodsCl) mapped.category = rawGoodsCl;
         mapped.acquiredAt = parseAcquiredDate(mapped.acquiredAt);
+        // 내용연수: 숫자 / 「미고시」 / 공란
+        const lifeRaw = String(mapped.usefulLife || '').trim();
+        if (!lifeRaw) {
+            delete mapped.usefulLife;
+        } else if (lifeRaw === '미고시') {
+            mapped.usefulLife = 0;
+            mapped.usefulLifeMatch = 'import-unnotified';
+        } else if (/^\d+(\.\d+)?$/.test(lifeRaw)) {
+            mapped.usefulLife = Number(lifeRaw);
+            mapped.usefulLifeMatch = mapped.usefulLifeMatch || 'import';
+        } else {
+            delete mapped.usefulLife;
+        }
         return mapped;
     }).filter((row) => row.assetNumber || row.itemName);
 }
@@ -1118,8 +1204,11 @@ async function exportRegisterUsefulLife() {
         let withDate = 0;
 
         const detail = scoped.map((record) => {
+            const className = String(record.goodsClNm || '').trim();
+            const specHead = String(record.model || '').split(',')[0].trim();
+            const itemName = String(record.itemName || '').trim();
             const info = describeUsefulLife({
-                itemName: record.itemName,
+                itemName: className || specHead || itemName,
                 goodsClNo: record.goodsClNo,
                 acquiredAt: record.acquiredAt
             }, today);
@@ -1129,20 +1218,36 @@ async function exportRegisterUsefulLife() {
             if (record.acquiredAt) withDate += 1;
 
             const nameKey = normalizeGoodsName(record.itemName);
+            const classKey = normalizeGoodsName(record.goodsClNm);
+            const checkKey = [nameKey, classKey].filter(Boolean).join('|') || nameKey;
             if (nameKey) uniqueNames.add(nameKey);
-            // 확인이 필요한 건 고유 물품명 단위로 묶는다. 같은 이름 수백 대를 한 번만 고르면 된다
-            if (nameKey && (info.verdict === 'ambiguous' || info.verdict === 'missing')) {
-                const bucket = needsCheck.get(nameKey);
-                if (bucket) bucket.count += 1;
-                else needsCheck.set(nameKey, { itemName: record.itemName, count: 1, info });
+            // 확인이 필요한 건 물품명+분류명 단위로 묶는다. 같은 자산명이라도 품명이 다르면 따로 본다
+            if (checkKey && (info.verdict === 'ambiguous' || info.verdict === 'missing')) {
+                const bucket = needsCheck.get(checkKey);
+                if (bucket) {
+                    bucket.count += 1;
+                    if (!bucket.specSample && record.model) bucket.specSample = record.model;
+                } else {
+                    needsCheck.set(checkKey, {
+                        itemName: record.itemName,
+                        goodsClNm: record.goodsClNm || '',
+                        category: record.category || '',
+                        specSample: record.model || '',
+                        count: 1,
+                        info
+                    });
+                }
             }
 
             return {
                 '자산번호': record.assetNumber || '',
                 '물품명': record.itemName || '',
+                '분류명': record.goodsClNm || '',
+                '분류번호': record.goodsClNo || '',
+                '규격': record.model || '',
+                '계정과목': record.category || '',
                 '대조상태': REGISTER_STATUS[resolveRegisterStatus(record, surveyedIndex)]?.label || '',
                 '취득일자': record.acquiredAt || '',
-                '대장분류번호': record.goodsClNo || '',
                 '매칭판정': USEFUL_LIFE_VERDICT_LABEL[info.verdict] || '',
                 '매칭경로': USEFUL_LIFE_MATCH_LABEL[info.match] || '',
                 '고시분류번호': info.goodsClNo,
@@ -1163,6 +1268,9 @@ async function exportRegisterUsefulLife() {
             .sort((a, b) => b.count - a.count)
             .map((entry) => ({
                 '물품명': entry.itemName,
+                '분류명': entry.goodsClNm || '',
+                '규격 예시': entry.specSample || '',
+                '계정과목': entry.category || '',
                 '대장 건수': entry.count,
                 '판정': USEFUL_LIFE_VERDICT_LABEL[entry.info.verdict] || '',
                 '후보 수': entry.info.candidates.length,

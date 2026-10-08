@@ -746,6 +746,24 @@ function matchUsefulLife(input) {
         return usefulLifeMatchResult(usefulLifeEntry(synonym.row, 'synonym'), [], true);
     }
 
+    // 4.5 목록정보(영문·세부품명)에서 유일 매칭되면 그 분류번호를 쓴다
+    if (typeof resolveUsefulLifeFromCatalog === 'function') {
+        const catalogHit = resolveUsefulLifeFromCatalog(source.itemName);
+        if (catalogHit?.auto && catalogHit.entry) {
+            const life = lookupUsefulLifeByCode(catalogHit.entry.goodsClNo);
+            if (life) {
+                return usefulLifeMatchResult({ ...life, match: 'catalog' }, catalogHit.candidates || [], true);
+            }
+            return usefulLifeMatchResult({
+                goodsClNo: catalogHit.entry.goodsClNo,
+                goodsClNm: catalogHit.entry.goodsClNm,
+                usefulLife: 0,
+                notified: false,
+                match: 'catalog'
+            }, catalogHit.candidates || [], true);
+        }
+    }
+
     // 5. 영↔한·유사 토큰으로 늘린 질의어
     // 영문 질의는 한글 정식명으로 자동 확정하고, 한글 일반명→세부명 확장은 후보만 올린다
     const expandedKeys = expandUsefulLifeKeys(source.itemName);
@@ -829,6 +847,19 @@ function matchUsefulLife(input) {
         return usefulLifeMatchResult(null, sortUsefulLifeCandidates(merged), false);
     }
 
+    // 8. 목록정보 다중 정확일치만 후보로 (prefix/contain은 고르기 모달에서만)
+    if (typeof lookupGoodsCatalogByName === 'function' && typeof usefulLifeCandidateFromCatalog === 'function') {
+        const catalogHit = lookupGoodsCatalogByName(source.itemName);
+        if (catalogHit.candidates?.length > 1) {
+            const catalogCandidates = catalogHit.candidates
+                .map((entry) => usefulLifeCandidateFromCatalog(entry, 0.82))
+                .filter(Boolean);
+            if (catalogCandidates.length) {
+                return usefulLifeMatchResult(null, sortUsefulLifeCandidates(catalogCandidates), false);
+            }
+        }
+    }
+
     return usefulLifeMatchResult(null, [], false);
 }
 
@@ -850,7 +881,11 @@ const USEFUL_LIFE_MATCH_LABEL = {
     code: '분류번호',
     alias: '학습사전',
     exact: '정확일치',
-    contains: '품명포함'
+    contains: '품명포함',
+    synonym: '동의어',
+    locale: '언어변환',
+    catalog: '목록정보',
+    pick: '직접선택'
 };
 
 function usefulLifeCandidateText(candidates, limit = 5) {

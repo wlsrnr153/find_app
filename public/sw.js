@@ -1,4 +1,4 @@
-const CACHE_NAME = 'find-app-shell-v16';
+const CACHE_NAME = 'find-app-shell-v26';
 const APP_SHELL = [
     '/index.html',
     '/login.html',
@@ -8,6 +8,7 @@ const APP_SHELL = [
     '/masters.js',
     '/register.js',
     '/useful-life.js',
+    '/goods-catalog.js',
     '/useful-life-ui.js',
     '/useful-life-excel.js',
     '/useful-life-register.js',
@@ -20,7 +21,8 @@ const APP_SHELL = [
 
 // 덩치가 커서 받다 실패할 수 있는 자산. 실패해도 설치는 성공시키고 나중에 fetch에서 채운다
 const OPTIONAL_ASSETS = [
-    '/useful-life.json'
+    '/useful-life.json',
+    '/goods-catalog.json'
 ];
 
 self.addEventListener('install', (event) => {

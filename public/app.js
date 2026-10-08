@@ -266,6 +266,9 @@ async function initApp() {
     if (typeof ensureUsefulLifeTable === 'function') {
         ensureUsefulLifeTable();
     }
+    if (typeof ensureGoodsCatalog === 'function') {
+        ensureGoodsCatalog();
+    }
     if (typeof loadUsefulLifeAliases === 'function') {
         loadUsefulLifeAliases();
     }

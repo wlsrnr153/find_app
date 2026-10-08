@@ -56,9 +56,13 @@ function usefulLifeVerdictLabelKo(verdict) {
 }
 
 function buildUsefulLifeExcelRow(item, options = {}) {
+    const className = String(item.goodsClNm || '').trim();
+    const specHead = String(item.model || '').split(',')[0].trim();
+    const itemName = String(item.itemName || '').trim();
+    const matchName = className || specHead || itemName;
     const life = typeof describeUsefulLife === 'function'
         ? describeUsefulLife({
-            itemName: item.itemName,
+            itemName: matchName,
             goodsClNo: item.goodsClNo,
             acquiredAt: item.acquiredAt
         })
@@ -82,7 +86,7 @@ function buildUsefulLifeExcelRow(item, options = {}) {
     if (resolvedEntry) pushCandidate(resolvedEntry);
     (life?.candidates || []).forEach(pushCandidate);
     if (typeof collectUsefulLifeBroadCandidates === 'function') {
-        collectUsefulLifeBroadCandidates(item.itemName, UL_EXCEL_CANDIDATE_LIMIT).forEach(pushCandidate);
+        collectUsefulLifeBroadCandidates(matchName || itemName, UL_EXCEL_CANDIDATE_LIMIT).forEach(pushCandidate);
     }
 
     const selected = resolvedEntry ? formatUsefulLifeSelectOption(resolvedEntry) : '';
@@ -103,9 +107,12 @@ function buildUsefulLifeExcelRow(item, options = {}) {
             '조사회차': item.surveyName || '',
             '자산번호': item.assetNumber || '',
             '물품명': item.itemName || '',
+            '분류명': item.goodsClNm || '',
+            '규격': item.model || '',
+            '계정과목': item.category || '',
             '취득일자': item.acquiredAt || life?.acquiredAt || '',
             '현재분류번호': item.goodsClNo || life?.goodsClNo || '',
-            '현재분류명': item.goodsClNm || life?.goodsClNm || '',
+            '현재분류명': life?.goodsClNm || item.goodsClNm || '',
             '내용연수(년)': item.usefulLife || life?.usefulLife || '',
             '만료일자': life?.expiry || '',
             '잔여상태': usefulLifeStatusLabelKo(life?.status),
@@ -129,7 +136,7 @@ function buildUsefulLifeExcelRow(item, options = {}) {
 }
 
 const UL_EXCEL_HEADERS = [
-    '대상', '문서ID', '조사회차', '자산번호', '물품명', '취득일자',
+    '대상', '문서ID', '조사회차', '자산번호', '물품명', '분류명', '규격', '계정과목', '취득일자',
     '현재분류번호', '현재분류명', '내용연수(년)', '만료일자', '잔여상태', '매칭상태',
     UL_EXCEL_SELECT_HEADER, '후보1', '후보2', '후보3', '후보4', '후보5', '후보6', '후보7', '후보8',
     '비고', '조사자', '기관명', '사용위치', '조사일시'
@@ -218,6 +225,9 @@ function addUsefulLifeSheet(workbook, name, rows) {
             '문서ID': 22,
             '대상': 8,
             '물품명': 22,
+            '분류명': 24,
+            '규격': 36,
+            '계정과목': 12,
             [UL_EXCEL_SELECT_HEADER]: 36,
             [UL_EXCEL_DIRECT_HEADER]: 40,
             '후보1': 32,

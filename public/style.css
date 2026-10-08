@@ -462,6 +462,93 @@ body.dark-mode .survey-input-banner.is-closed {
     min-width: 140px;
 }
 
+.register-cell-class {
+    min-width: 140px;
+    color: var(--gray-700, #374151);
+}
+
+.register-cell-class .ul-matched-class,
+.register-cell-class .ul-register-code {
+    display: block;
+    margin-top: 2px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--gray-500, #6b7280);
+}
+
+.register-cell-class .ul-register-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.register-cell-spec {
+    min-width: 180px;
+    max-width: 280px;
+    font-size: 13px;
+    color: var(--gray-700, #374151);
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.ul-picker-context {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--gray-200, #e5e7eb);
+    border-radius: 8px;
+    background: var(--gray-50, #f9fafb);
+}
+
+.ul-picker-context-row {
+    display: grid;
+    grid-template-columns: 72px 1fr;
+    gap: 8px;
+    align-items: start;
+    margin-top: 6px;
+}
+
+.ul-picker-context-row:first-child {
+    margin-top: 0;
+}
+
+.ul-picker-context-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--gray-500, #6b7280);
+}
+
+.ul-picker-context-links {
+    margin-top: 10px;
+    font-size: 12px;
+}
+
+.ul-picker-context-links a {
+    color: var(--primary, #2563eb);
+    text-decoration: none;
+}
+
+.ul-picker-context-links a:hover {
+    text-decoration: underline;
+}
+
+.ul-candidate-eng {
+    display: block;
+    margin-top: 2px;
+    font-size: 12px;
+    font-style: normal;
+    color: var(--gray-500, #6b7280);
+}
+
+.ul-candidate-explain {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--gray-600, #4b5563);
+    text-align: left;
+}
+
 .register-cell-actions {
     white-space: nowrap;
 }

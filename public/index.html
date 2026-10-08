@@ -574,7 +574,7 @@
         <div class="tab-content" id="usefullife">
             <div class="manage-section">
                 <h2>⏳ 대장 내용연수 분석</h2>
-                <p>관리 탭에서 올린 <strong>자산 대장</strong>을 대상으로 내용연수를 맞춥니다. 확인필요 시트에서 선택분류를 고르고, 목록에 없으면 같은 행의 <strong>직접분류</strong>에 적습니다.</p>
+                <p>관리 탭에서 올린 <strong>자산 대장</strong>을 대상으로 내용연수를 맞춥니다. 통계는 대장에 저장된 내용연수·학습사전을 우선하고, 없으면 고시표 자동매칭을 씁니다. 엑셀에서 내용연수를 고친 뒤에는 대장을 다시 올리면 숫자가 맞습니다.</p>
 
                 <div id="ulRegisterStats" class="ul-register-stats">
                     <div><b id="ulStatTotal">0</b><span>전체</span></div>
@@ -593,7 +593,7 @@
                 </div>
 
                 <div class="register-controls">
-                    <input type="text" id="ulRegisterSearch" placeholder="🔍 자산번호, 물품명, 분류 검색">
+                    <input type="text" id="ulRegisterSearch" placeholder="🔍 자산번호, 물품명, 분류명, 규격 검색">
                 </div>
 
                 <div class="export-buttons" style="margin-bottom: 16px;">
@@ -612,6 +612,8 @@
                                 <th>자산번호</th>
                                 <th>물품명</th>
                                 <th>분류명</th>
+                                <th>규격</th>
+                                <th class="col-optional">계정</th>
                                 <th>연수</th>
                                 <th class="col-optional">취득일자</th>
                                 <th class="col-optional">만료</th>
@@ -802,10 +804,19 @@
                 <button class="close-btn" id="closeUsefulLifePicker">&times;</button>
             </div>
             <div class="modal-body">
+                <div id="usefulLifePickerContext" class="ul-picker-context" hidden></div>
                 <input type="search" id="usefulLifeSearch" class="ul-search" placeholder="품명 또는 분류번호 검색" autocomplete="off">
                 <label class="ul-learn-same">
                     <input type="checkbox" id="usefulLifeLearnSame" checked>
                     <span>같은 물품명에는 앞으로 자동 적용</span>
+                </label>
+                <label class="ul-learn-same" id="usefulLifeApplySameItemWrap" hidden>
+                    <input type="checkbox" id="usefulLifeApplySameItem" checked>
+                    <span id="usefulLifeApplySameItemText">같은 물품명도 함께 변경</span>
+                </label>
+                <label class="ul-learn-same" id="usefulLifeApplySameClassWrap" hidden>
+                    <input type="checkbox" id="usefulLifeApplySameClass" checked>
+                    <span id="usefulLifeApplySameClassText">같은 분류명도 함께 변경</span>
                 </label>
                 <div id="usefulLifePickerList" class="ul-candidate-list ul-candidate-list-modal"></div>
                 <p id="usefulLifePickerEmpty" class="register-empty" hidden>검색어를 입력하세요.</p>
@@ -994,6 +1005,7 @@
     <!-- 조사 회차 / 기관 / 위치 마스터 -->
     <script src="masters.js"></script>
     <script src="useful-life.js"></script>
+    <script src="goods-catalog.js"></script>
     <script src="useful-life-ui.js"></script>
     <script src="useful-life-excel.js"></script>
     <script src="useful-life-register.js"></script>

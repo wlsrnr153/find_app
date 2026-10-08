@@ -6,6 +6,19 @@ uploads/
 
 # 로컬 데이터 (선택사항)
 data/items.json
+data/goods-catalog.checkpoint.json
+data/_migosi-rows.json
+data/register-picks-export.json
+data/_*.json
+# public 스냅샷과 중복 (스크립트 원본은 public/goods-catalog.json 사용)
+data/goods-catalog.json
+
+# 임시 프로브 스크립트
+scripts/_probe*.ps1
+scripts/_read-*.ps1
+
+# 로컬 IDE
+*.code-workspace
 
 # 환경 설정
 .env

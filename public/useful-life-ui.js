@@ -268,6 +268,17 @@ function resolveUsefulLifeDirectCandidate() {
     };
 }
 
+function readUsefulLifeSameGroupOptions() {
+    const list = document.getElementById('usefulLifePickerList');
+    return {
+        applySameItem: document.getElementById('usefulLifeApplySameItem')?.checked === true,
+        applySameClass: document.getElementById('usefulLifeApplySameClass')?.checked === true,
+        sameItemKey: list?.dataset.ulSameItemKey || '',
+        sameClassKey: list?.dataset.ulSameClassKey || '',
+        sameClassCode: list?.dataset.ulSameClassCode || ''
+    };
+}
+
 async function applyUsefulLifeDirectInput() {
     const candidate = resolveUsefulLifeDirectCandidate();
     if (!candidate) {
@@ -277,15 +288,74 @@ async function applyUsefulLifeDirectInput() {
         return;
     }
     const learn = document.getElementById('usefulLifeLearnSame')?.checked !== false;
+    const sameOptions = readUsefulLifeSameGroupOptions();
     const list = document.getElementById('usefulLifePickerList');
     const registerId = list?.dataset.ulRegisterId || '';
     if (list) list.dataset.ulRegisterId = '';
     closeUsefulLifePicker();
     if (registerId && typeof applyUsefulLifeRegisterPick === 'function') {
-        await applyUsefulLifeRegisterPick(registerId, candidate, learn);
+        await applyUsefulLifeRegisterPick(registerId, candidate, learn, sameOptions);
         return;
     }
     await applyUsefulLifePick(candidate, { learn });
+}
+
+function setUsefulLifeSameGroupCheckbox(wrapId, boxId, textId, options = {}) {
+    const wrap = document.getElementById(wrapId);
+    const box = document.getElementById(boxId);
+    const text = document.getElementById(textId);
+    if (!wrap || !box) return false;
+
+    const count = Number(options.count) || 0;
+    const label = String(options.label || '').trim();
+    const kindLabel = options.kindLabel || '항목';
+    const key = label
+        ? (typeof normalizeGoodsName === 'function' ? normalizeGoodsName(label) : label.toLowerCase())
+        : '';
+    const enabled = !!options.enabled && count > 0 && !!key;
+
+    wrap.hidden = !enabled;
+    box.checked = enabled;
+    if (text) {
+        text.textContent = enabled
+            ? `같은 ${kindLabel} "${label}" ${count}건도 함께 변경`
+            : `같은 ${kindLabel}도 함께 변경`;
+    }
+    return enabled ? key : '';
+}
+
+/** 대장 분류 고르기: 같은 물품명 / 같은 분류명 체크란을 각각 표시 */
+function setUsefulLifeApplySameGroupUi(options = {}) {
+    const list = document.getElementById('usefulLifePickerList');
+    const itemKey = setUsefulLifeSameGroupCheckbox(
+        'usefulLifeApplySameItemWrap',
+        'usefulLifeApplySameItem',
+        'usefulLifeApplySameItemText',
+        {
+            enabled: options.enabled !== false,
+            kindLabel: '물품명',
+            label: options.itemLabel || '',
+            count: options.itemCount || 0
+        }
+    );
+    const classKey = setUsefulLifeSameGroupCheckbox(
+        'usefulLifeApplySameClassWrap',
+        'usefulLifeApplySameClass',
+        'usefulLifeApplySameClassText',
+        {
+            enabled: options.enabled !== false,
+            kindLabel: '분류명',
+            label: options.classLabel || '',
+            count: options.classCount || 0
+        }
+    );
+    if (list) {
+        list.dataset.ulSameItemKey = itemKey || '';
+        list.dataset.ulSameClassKey = classKey || '';
+        list.dataset.ulSameClassCode = options.classCode || list.dataset.ulSameClassCode || '';
+        list.dataset.ulSameItemCount = itemKey ? String(options.itemCount || 0) : '0';
+        list.dataset.ulSameClassCount = classKey ? String(options.classCount || 0) : '0';
+    }
 }
 
 function openUsefulLifePicker() {
@@ -303,6 +373,7 @@ function openUsefulLifePicker() {
 
     const learn = document.getElementById('usefulLifeLearnSame');
     if (learn) learn.checked = true;
+    setUsefulLifeApplySameGroupUi({ enabled: false });
 
     const search = document.getElementById('usefulLifeSearch');
     if (search) search.value = '';
@@ -318,7 +389,20 @@ function closeUsefulLifePicker() {
     const modal = document.getElementById('usefulLifePickerModal');
     if (!modal) return;
     const list = document.getElementById('usefulLifePickerList');
-    if (list) list.dataset.ulRegisterId = '';
+    if (list) {
+        list.dataset.ulRegisterId = '';
+        list.dataset.ulSameItemKey = '';
+        list.dataset.ulSameClassKey = '';
+        list.dataset.ulSameClassCode = '';
+        list.dataset.ulSameItemCount = '0';
+        list.dataset.ulSameClassCount = '0';
+    }
+    setUsefulLifeApplySameGroupUi({ enabled: false });
+    const context = document.getElementById('usefulLifePickerContext');
+    if (context) {
+        context.hidden = true;
+        context.innerHTML = '';
+    }
     modal.classList.remove('show');
     document.body.style.overflow = 'auto';
 }
@@ -453,3 +537,6 @@ if (typeof document !== 'undefined') {
 window.refreshUsefulLifeUi = refreshUsefulLifeUi;
 window.openUsefulLifePicker = openUsefulLifePicker;
 window.applyUsefulLifePick = applyUsefulLifePick;
+window.setUsefulLifeApplySameGroupUi = setUsefulLifeApplySameGroupUi;
+window.setUsefulLifeApplySameClassUi = setUsefulLifeApplySameGroupUi;
+window.readUsefulLifeSameGroupOptions = readUsefulLifeSameGroupOptions;
