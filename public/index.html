@@ -645,6 +645,71 @@
                 </div>
             </div>
 
+            <div class="manage-section">
+                <h2>🔄 RFID 취득재산 일괄등록 변환</h2>
+                <p>다른 자산대장 엑셀을 분석해 <strong>RFID_OAST</strong> 양식(8행 헤더)에 맞춰 9행부터 채운 파일을 내려받습니다. 분류·식별이 비어 있으면 목록정보(로컬 스냅샷)로 자동 채웁니다.</p>
+                <input type="file" id="rfidSourceFile" accept=".xlsx,.xls" style="display: none;">
+                <div class="export-buttons">
+                    <button class="btn btn-primary" id="rfidSourcePickBtn" type="button">📂 원본 대장 선택</button>
+                    <button class="btn btn-success" id="rfidConvertDownloadBtn" type="button" disabled>⬇️ 변환 다운로드</button>
+                </div>
+                <p id="rfidConvertStatus" class="rfid-convert-status"></p>
+
+                <div id="rfidConvertPanel" class="rfid-convert-panel" hidden>
+                    <label class="rfid-field">
+                        <span>원본 시트</span>
+                        <select id="rfidSourceSheet"></select>
+                    </label>
+
+                    <label class="rfid-auto-catalog">
+                        <input type="checkbox" id="rfidAutoCatalog" checked>
+                        <span>목록정보 자동 매칭 (세부품명번호→분류 우선, 애매한 이름 매칭은 제외)</span>
+                    </label>
+
+                    <div class="rfid-defaults">
+                        <h3>필수 코드 기본값</h3>
+                        <p class="rfid-ref-help">참조 시트(운영부서·취득사유·국가 등)에 이름↔코드가 있으면 행의 소속/조사부서 등으로 기본값을 덮어씁니다.</p>
+                        <div class="rfid-defaults-grid">
+                            <label>운영부서 <input id="rfidDefaultDept" type="text" value="6880"></label>
+                            <label>물품대장코드 <input id="rfidDefaultLedger" type="text" value="1"></label>
+                            <label>국내외구분 <input id="rfidDefaultDomestic" type="text" value="1"></label>
+                            <label>국가코드 <input id="rfidDefaultCountry" type="text" value="KR"></label>
+                            <label>취득사유 <input id="rfidDefaultReason" type="text" value="0403"></label>
+                        </div>
+                        <div class="export-buttons" style="margin-top: 10px;">
+                            <input type="file" id="rfidRefFile" accept=".xlsx,.xls" style="display: none;">
+                            <button class="btn btn-secondary" id="rfidRefPickBtn" type="button">📑 참조 코드표 추가</button>
+                            <button class="btn btn-secondary" id="rfidRefTemplateBtn" type="button">⬇️ 운영부서 양식</button>
+                        </div>
+                        <div id="rfidRefSheetPanel" class="rfid-ref-sheet-panel" hidden>
+                            <label class="rfid-field">
+                                <span>참조 시트</span>
+                                <select id="rfidRefSheetSelect" disabled>
+                                    <option value="">파일을 먼저 선택하세요</option>
+                                </select>
+                            </label>
+                            <label class="rfid-field">
+                                <span>코드 종류</span>
+                                <select id="rfidRefKindSelect">
+                                    <option value="auto">자동 감지</option>
+                                    <option value="deptCode">운영부서</option>
+                                    <option value="acquireReason">취득사유</option>
+                                    <option value="countryCode">국가코드</option>
+                                    <option value="ledgerCode">물품대장</option>
+                                    <option value="domesticCode">국내외구분</option>
+                                </select>
+                            </label>
+                        </div>
+                        <p id="rfidRefStatus" class="rfid-ref-status"></p>
+                    </div>
+
+                    <h3>열 매핑</h3>
+                    <div id="rfidMapFields" class="rfid-map-fields"></div>
+                    <p id="rfidConvertWarn" class="rfid-convert-warn"></p>
+                    <div id="rfidPreview"></div>
+                </div>
+            </div>
+
             <!-- 사용자 관리 섹션 (관리자 전용) -->
             <div class="manage-section" id="userManagementSection" style="display: none;">
                 <h2>👥 사용자 관리</h2>
@@ -984,19 +1049,19 @@
         </div>
     </div>
 
-    <!-- Firebase SDK -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-functions-compat.js"></script>
+    <!-- Firebase SDK (로컬 vendor — 오프라인용) -->
+    <script src="vendor/firebase-app-compat.js"></script>
+    <script src="vendor/firebase-auth-compat.js"></script>
+    <script src="vendor/firebase-firestore-compat.js"></script>
+    <script src="vendor/firebase-functions-compat.js"></script>
     
     <!-- Firebase 설정 -->
     <script src="firebase-config.js"></script>
     
-    <!-- SheetJS for Excel -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <!-- Excel / QR (로컬 vendor — 오프라인용) -->
+    <script src="vendor/xlsx.full.min.js"></script>
+    <script src="vendor/exceljs.min.js"></script>
+    <script src="vendor/html5-qrcode.min.js"></script>
     
     <!-- 캐시 최적화 스크립트 (먼저 로드) -->
     <script src="app-optimized.js"></script>
@@ -1006,10 +1071,12 @@
     <script src="masters.js"></script>
     <script src="useful-life.js"></script>
     <script src="goods-catalog.js"></script>
+    <script src="goods-idntfc.js"></script>
     <script src="useful-life-ui.js"></script>
     <script src="useful-life-excel.js"></script>
     <script src="useful-life-register.js"></script>
     <script src="register.js"></script>
+    <script src="excel-form-convert.js"></script>
     
     <!-- 메인 앱 스크립트 -->
     <script src="app.js"></script>

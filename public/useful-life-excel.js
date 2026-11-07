@@ -146,7 +146,7 @@ async function ensureExcelJS() {
     if (typeof ExcelJS !== 'undefined') return ExcelJS;
     await new Promise((resolve, reject) => {
         const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+        script.src = 'vendor/exceljs.min.js';
         script.onload = resolve;
         script.onerror = () => reject(new Error('ExcelJS를 불러오지 못했습니다'));
         document.head.appendChild(script);

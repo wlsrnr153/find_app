@@ -10,9 +10,11 @@ let goodsCatalogLoading = null;
 let goodsCatalogByCode = new Map();
 let goodsCatalogByName = new Map(); // normalizeName → goodsClNo[]
 let goodsCatalogByEng = new Map();
+let goodsCatalogByDetailNo = new Map(); // 세부품명번호(10) → { entry, detail }
 let goodsCatalogNameKeys = []; // 검색용 정규화 키 목록
 let goodsCatalogEngKeys = [];
 let goodsCatalogCodes = []; // 코드 prefix 검색용
+let goodsCatalogDetailNos = []; // 세부품명번호 prefix 검색용
 
 function goodsCatalogNormalize(value) {
     if (typeof normalizeGoodsName === 'function') return normalizeGoodsName(value);
@@ -37,6 +39,7 @@ function applyGoodsCatalogSnapshot(snapshot) {
     const byCode = new Map();
     const byName = new Map();
     const byEng = new Map();
+    const byDetail = new Map();
 
     rows.forEach((item) => {
         const code = String(item.goodsClNo || '').trim();
@@ -54,19 +57,32 @@ function applyGoodsCatalogSnapshot(snapshot) {
         entry.details.forEach((detail) => {
             goodsCatalogAddNameIndex(byName, detail.goodsClDetailNm, code);
             goodsCatalogAddNameIndex(byEng, detail.engNm, code);
+            const detailNo = String(detail.goodsClDetailNo || '').replace(/\D/g, '');
+            if (detailNo.length >= 8) {
+                byDetail.set(detailNo, {
+                    entry,
+                    detail: {
+                        goodsClDetailNo: detailNo,
+                        goodsClDetailNm: String(detail.goodsClDetailNm || '').trim(),
+                        engNm: String(detail.engNm || '').trim()
+                    }
+                });
+            }
         });
     });
 
     goodsCatalogByCode = byCode;
     goodsCatalogByName = byName;
     goodsCatalogByEng = byEng;
+    goodsCatalogByDetailNo = byDetail;
     goodsCatalogNameKeys = [...byName.keys()];
     goodsCatalogEngKeys = [...byEng.keys()];
     goodsCatalogCodes = [...byCode.keys()];
+    goodsCatalogDetailNos = [...byDetail.keys()];
     goodsCatalogTable = {
         기준일: snapshot['기준일'] || '',
         분류건수: byCode.size,
-        세부품명건수: snapshot['세부품명건수'] || 0,
+        세부품명건수: byDetail.size || snapshot['세부품명건수'] || 0,
         해설건수: snapshot['해설건수'] || 0
     };
     return goodsCatalogTable;
@@ -98,6 +114,83 @@ function lookupGoodsCatalogByCode(code) {
     if (!digits) return null;
     const eight = digits.length >= 8 ? digits.slice(0, 8) : digits;
     return goodsCatalogByCode.get(eight) || null;
+}
+
+/**
+ * 세부품명번호(식별에 가까운 10자리)로 조회.
+ * 분류번호(8자리)보다 구체적이므로 ID 우선 매칭에 쓴다.
+ */
+function lookupGoodsCatalogByDetailNo(detailNo) {
+    const digits = String(detailNo || '').replace(/\D/g, '');
+    if (!digits) return null;
+    if (goodsCatalogByDetailNo.has(digits)) {
+        return goodsCatalogByDetailNo.get(digits);
+    }
+    // 앞자리만 온 경우 유일 prefix면 채택
+    if (digits.length >= 8 && digits.length < 12) {
+        const hits = goodsCatalogDetailNos.filter((no) => no.startsWith(digits));
+        if (hits.length === 1) return goodsCatalogByDetailNo.get(hits[0]) || null;
+    }
+    return null;
+}
+
+/**
+ * 목록정보 코드 해석.
+ * - 세부품명번호(보통 10자리) → 분류(8자리) 유도
+ * - 긴 RFID/자산번호(>12자리)는 앞자리 오인 매칭 금지
+ * @param {string} code
+ * @param {{ allowClassNo?: boolean }} [options]
+ */
+function resolveGoodsCatalogByAnyCode(code, options = {}) {
+    const allowClassNo = options.allowClassNo !== false;
+    const digits = String(code || '').replace(/\D/g, '');
+    if (!digits) return null;
+
+    // 기관 자산번호·RFID(매우 긴 숫자)는 목록정보 키가 아님
+    if (digits.length > 12) return null;
+
+    const byDetail = lookupGoodsCatalogByDetailNo(digits);
+    if (byDetail?.entry) {
+        return {
+            goodsClNo: byDetail.entry.goodsClNo,
+            goodsClNm: byDetail.entry.goodsClNm,
+            goodsClDetailNo: byDetail.detail?.goodsClDetailNo || digits,
+            goodsClDetailNm: byDetail.detail?.goodsClDetailNm || '',
+            entry: byDetail.entry,
+            via: 'detail-no'
+        };
+    }
+
+    // 세부품명번호 형식(10자리)만 앞 8자리를 분류로 사용
+    if (digits.length === 10) {
+        const eight = digits.slice(0, 8);
+        const entry = goodsCatalogByCode.get(eight);
+        if (entry) {
+            return {
+                goodsClNo: entry.goodsClNo,
+                goodsClNm: entry.goodsClNm,
+                goodsClDetailNo: digits,
+                goodsClDetailNm: '',
+                entry,
+                via: 'detail-prefix-class'
+            };
+        }
+    }
+
+    if (allowClassNo && digits.length === 8) {
+        const entry = goodsCatalogByCode.get(digits);
+        if (entry) {
+            return {
+                goodsClNo: entry.goodsClNo,
+                goodsClNm: entry.goodsClNm,
+                goodsClDetailNo: '',
+                goodsClDetailNm: '',
+                entry,
+                via: 'class-no'
+            };
+        }
+    }
+    return null;
 }
 
 function goodsCatalogCodesForName(name) {
@@ -168,6 +261,19 @@ function searchGoodsCatalog(query, limit, options = {}) {
             if (!code.startsWith(codeKey)) return;
             scores.set(code, Math.max(scores.get(code) || 0, 0.88));
         });
+        // 세부품명번호(식별)로도 검색 — 맞으면 상위 분류를 반환
+        const detailHit = lookupGoodsCatalogByDetailNo(codeKey);
+        if (detailHit?.entry?.goodsClNo) {
+            scores.set(detailHit.entry.goodsClNo, Math.max(scores.get(detailHit.entry.goodsClNo) || 0, 0.98));
+        } else if (codeKey.length >= 8) {
+            goodsCatalogDetailNos.forEach((no) => {
+                if (!no.startsWith(codeKey) && !codeKey.startsWith(no.slice(0, codeKey.length))) return;
+                const hit = goodsCatalogByDetailNo.get(no);
+                if (hit?.entry?.goodsClNo) {
+                    scores.set(hit.entry.goodsClNo, Math.max(scores.get(hit.entry.goodsClNo) || 0, 0.95));
+                }
+            });
+        }
     }
 
     return [...scores.entries()]

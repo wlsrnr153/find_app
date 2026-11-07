@@ -4,6 +4,7 @@ const multer = require('multer');
 const xlsx = require('xlsx');
 const fs = require('fs');
 const path = require('path');
+const goodsIdntfc = require('./lib/goods-idntfc');
 
 const app = express();
 const PORT = 3000;
@@ -219,6 +220,39 @@ app.delete('/api/items', (req, res) => {
     res.json({ success: true, message: '모든 데이터가 삭제되었습니다' });
   } else {
     res.status(500).json({ success: false, message: '삭제 실패' });
+  }
+});
+
+// 나라장터 품목 식별번호(8자리) → 분류번호 캐시/조회
+app.get('/api/goods-idntfc/cache', (req, res) => {
+  res.json(goodsIdntfc.getCacheSnapshot());
+});
+
+app.get('/api/goods-idntfc/:id', async (req, res) => {
+  try {
+    const entry = await goodsIdntfc.resolveOne(req.params.id, {
+      force: String(req.query.force || '') === '1'
+    });
+    if (!entry) {
+      return res.status(404).json({ success: false, message: '식별번호 결과 없음' });
+    }
+    res.json({ success: true, entry });
+  } catch (error) {
+    console.error('goods-idntfc lookup error:', error);
+    res.status(502).json({ success: false, message: error.message || '목록정보 조회 실패' });
+  }
+});
+
+app.post('/api/goods-idntfc/resolve', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const force = Boolean(req.body?.force);
+    const concurrency = Number(req.body?.concurrency) || 4;
+    const out = await goodsIdntfc.resolveMany(ids, { force, concurrency });
+    res.json({ success: true, ...out });
+  } catch (error) {
+    console.error('goods-idntfc batch error:', error);
+    res.status(502).json({ success: false, message: error.message || '목록정보 일괄 조회 실패' });
   }
 });
 

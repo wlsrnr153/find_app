@@ -12,6 +12,8 @@ data/register-picks-export.json
 data/_*.json
 # public 스냅샷과 중복 (스크립트 원본은 public/goods-catalog.json 사용)
 data/goods-catalog.json
+data/goods-idntfc-cache.json
+data/_idntfc-sample.html
 
 # 임시 프로브 스크립트
 scripts/_probe*.ps1
