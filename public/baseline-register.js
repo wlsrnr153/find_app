@@ -318,11 +318,11 @@ function renderBaselineComparePanel(record, options = {}) {
     }
 }
 
-function collectBaselineFormChanges(formData) {
-    if (!activeBaselineRecord) return [];
+function collectBaselineFormChanges(formData, baselineRecord = activeBaselineRecord) {
+    if (!baselineRecord) return [];
     const changes = [];
     BASELINE_COMPARE_FIELDS.forEach((field) => {
-        const fromBaseline = normalizeBaselineValue(activeBaselineRecord[field.key]);
+        const fromBaseline = normalizeBaselineValue(baselineRecord[field.key]);
         let fromForm = '';
         if (formData && formData[field.key] != null) {
             fromForm = normalizeBaselineValue(formData[field.key]);
@@ -332,9 +332,9 @@ function collectBaselineFormChanges(formData) {
         // location은 건물/층/실 조합일 수 있음
         if (field.key === 'location' && !fromForm) {
             fromForm = normalizeBaselineValue([
-                document.getElementById('building')?.value,
-                document.getElementById('floor')?.value,
-                document.getElementById('room')?.value
+                formData?.building || document.getElementById('building')?.value,
+                formData?.floor || document.getElementById('floor')?.value,
+                formData?.room || document.getElementById('room')?.value
             ].filter(Boolean).join(' '));
         }
         if (!fromForm && !fromBaseline) return;
@@ -349,8 +349,9 @@ function collectBaselineFormChanges(formData) {
     return changes;
 }
 
-async function applyBaselineSurveyResult(assetNumber, itemId, formData = {}) {
-    const changes = collectBaselineFormChanges(formData);
+async function applyBaselineSurveyResult(assetNumber, itemId, formData = {}, baselineRecord = null) {
+    const baseline = baselineRecord || activeBaselineRecord;
+    const changes = collectBaselineFormChanges(formData, baseline);
     const changePatch = {};
     changes.forEach((change) => {
         if (change.to) changePatch[change.field] = change.to;
@@ -379,7 +380,7 @@ async function applyBaselineSurveyResult(assetNumber, itemId, formData = {}) {
         await markRegisterFound(assetNumber, itemId, { condition: formData.condition });
     }
 
-    return { changes, matchedBaseline: !!activeBaselineRecord };
+    return { changes, matchedBaseline: !!baseline };
 }
 
 function initBaselineRegister() {

@@ -1845,10 +1845,17 @@ async function handleAddItem(e) {
         return false;
     }
 
+    // 저장 전에 기준 대장 스냅샷을 잡아 둔다 (저장 중 패널이 비워져도 후처리 가능)
+    const baselineSnapshot = typeof activeBaselineRecordRef === 'function'
+        ? activeBaselineRecordRef()
+        : null;
+
     const formData = new FormData(itemForm);
     const data = {};
     formData.forEach((value, key) => {
-        if (value) data[key] = value;
+        if (value !== undefined && value !== null && String(value).trim() !== '') {
+            data[key] = typeof value === 'string' ? value.trim() : value;
+        }
     });
     if (typeof applyItemLocationFields === 'function') {
         applyItemLocationFields(data);
@@ -1864,14 +1871,45 @@ async function handleAddItem(e) {
     
     // 사용자 정보 추가
     data.userId = currentUser.uid;
-    data.userEmail = currentUser.email;
+    data.userEmail = currentUser.email || currentUser.providerData?.[0]?.email || '';
+    if (!data.userEmail) {
+        isSubmitting = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalBtnText;
+        }
+        showToast('로그인 이메일을 확인할 수 없어 저장할 수 없습니다. 다시 로그인해 주세요.', 'error');
+        return false;
+    }
     if (writableSurvey && !writableSurvey.isFallback && writableSurvey.id) {
         data.surveyId = writableSurvey.id;
-        data.surveyName = writableSurvey.name;
+        if (writableSurvey.name) data.surveyName = writableSurvey.name;
     }
+
+    // Firestore는 undefined/NaN을 거부하므로 저장 직전 정리
+    const sanitizeItemPayload = (raw) => {
+        const out = {};
+        Object.keys(raw || {}).forEach((key) => {
+            const value = raw[key];
+            if (value === undefined || value === null || value === '') return;
+            if (typeof value === 'number' && !Number.isFinite(value)) return;
+            out[key] = value;
+        });
+        if (out.usefulLife != null && out.usefulLife !== '') {
+            const life = Number(out.usefulLife);
+            if (Number.isFinite(life)) out.usefulLife = life;
+            else delete out.usefulLife;
+        }
+        if (out.quantity != null && out.quantity !== '') {
+            const qty = Number(out.quantity);
+            out.quantity = Number.isFinite(qty) && qty > 0 ? qty : 1;
+        }
+        return out;
+    };
+
     const persistOffline = async () => {
         const offlineData = {
-            ...data,
+            ...sanitizeItemPayload(data),
             timestamp: new Date().toISOString()
         };
         await saveItemOffline(offlineData);
@@ -1895,35 +1933,47 @@ async function handleAddItem(e) {
         return false;
     }
 
-    data.timestamp = firebase.firestore.FieldValue.serverTimestamp();
+    const payload = sanitizeItemPayload(data);
+    payload.timestamp = firebase.firestore.FieldValue.serverTimestamp();
     
     // 🔍 디버깅: 등록할 데이터 확인
     console.log('📝 물품 등록 시도:', {
-        물품명: data.itemName,
-        userId: data.userId,
-        userEmail: data.userEmail,
+        물품명: payload.itemName,
+        자산번호: payload.assetNumber,
+        userId: payload.userId,
+        userEmail: payload.userEmail,
         현재사용자: currentUser.uid,
-        현재역할: currentUserRole
+        현재역할: currentUserRole,
+        기준대장: !!baselineSnapshot
     });
     
     try {
-        const docRef = await db.collection('items').add(data);
+        const docRef = await db.collection('items').add(payload);
         let baselineChangeCount = 0;
-        if (typeof applyBaselineSurveyResult === 'function' && data.assetNumber) {
-            const baselineResult = await applyBaselineSurveyResult(data.assetNumber, docRef.id, data);
-            baselineChangeCount = baselineResult?.changes?.length || 0;
-            if (baselineResult?.matchedBaseline) {
-                data.baselineMatched = true;
-                if (baselineChangeCount) {
-                    await docRef.set({
-                        baselineMatched: true,
-                        baselineChangeCount,
-                        baselineChangedFields: (baselineResult.changes || []).map((c) => c.field)
-                    }, { merge: true });
+        try {
+            if (typeof applyBaselineSurveyResult === 'function' && payload.assetNumber) {
+                const baselineResult = await applyBaselineSurveyResult(
+                    payload.assetNumber,
+                    docRef.id,
+                    payload,
+                    baselineSnapshot
+                );
+                baselineChangeCount = baselineResult?.changes?.length || 0;
+                if (baselineResult?.matchedBaseline) {
+                    const baselineMeta = { baselineMatched: true };
+                    if (baselineChangeCount) {
+                        baselineMeta.baselineChangeCount = baselineChangeCount;
+                        baselineMeta.baselineChangedFields = (baselineResult.changes || []).map((c) => c.field);
+                    }
+                    await docRef.set(baselineMeta, { merge: true });
                 }
+            } else if (typeof markRegisterFound === 'function' && payload.assetNumber) {
+                await markRegisterFound(payload.assetNumber, docRef.id, { condition: payload.condition });
             }
-        } else if (typeof markRegisterFound === 'function' && data.assetNumber) {
-            await markRegisterFound(data.assetNumber, docRef.id, { condition: data.condition });
+        } catch (baselineError) {
+            // 실사 저장은 성공한 상태 — 기준/금년 대장 후처리 실패로 전체 실패 처리하지 않음
+            console.warn('기준 대장 후처리 실패:', baselineError);
+            showToast('저장은 완료됐지만 기준 대장 반영에 실패했습니다', 'info');
         }
         if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
         if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
@@ -1934,15 +1984,15 @@ async function handleAddItem(e) {
         
         // 🎉 물품 등록 알림 (더 명확하게)
         if (baselineChangeCount > 0) {
-            showToast(`✅ "${data.itemName || '물품'}" 등록 · 기준 대비 ${baselineChangeCount}개 항목 변경 반영`, 'success');
+            showToast(`✅ "${payload.itemName || '물품'}" 등록 · 기준 대비 ${baselineChangeCount}개 항목 변경 반영`, 'success');
         } else {
-            showToast(`✅ "${data.itemName || '물품'}" 등록 완료!`, 'success');
+            showToast(`✅ "${payload.itemName || '물품'}" 등록 완료!`, 'success');
         }
         
         // 브라우저 알림 (선택사항 - 권한 있을 경우)
         if ('Notification' in window && Notification.permission === 'granted') {
             new Notification('물품 등록 완료', {
-                body: `${data.itemName || '물품'}이(가) 등록되었습니다.`,
+                body: `${payload.itemName || '물품'}이(가) 등록되었습니다.`,
                 icon: '/favicon.ico'
             });
         }
@@ -1955,10 +2005,11 @@ async function handleAddItem(e) {
                 await persistOffline();
             } catch (offlineError) {
                 console.error('오프라인 저장 실패:', offlineError);
-                showToast('등록 중 오류가 발생했습니다', 'error');
+                showToast(`등록 중 오류: ${offlineError?.message || offlineError}`, 'error');
             }
         } else {
-            showToast('등록 중 오류가 발생했습니다', 'error');
+            const detail = error?.code ? `${error.code} ${error.message || ''}` : (error?.message || String(error));
+            showToast(`등록 중 오류: ${detail}`.trim(), 'error');
         }
     } finally {
         // 🔒 제출 플래그 해제 및 버튼 복원
