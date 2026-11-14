@@ -402,6 +402,18 @@
                 });
             });
         }
+
+        // 로그인 화면: 뒤로가기 시 종료 확인 팝업
+        (function initLoginBackGuard() {
+            try { history.pushState({ loginBackGuard: true }, '', location.href); } catch (e) { /* ignore */ }
+            window.addEventListener('popstate', () => {
+                if (window.confirm('앱을 종료하시겠습니까?')) {
+                    setTimeout(() => { try { history.back(); } catch (e) { /* ignore */ } }, 0);
+                    return;
+                }
+                try { history.pushState({ loginBackGuard: true }, '', location.href); } catch (e) { /* ignore */ }
+            });
+        })();
     </script>
 </body>
 </html>

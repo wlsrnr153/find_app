@@ -219,6 +219,7 @@ function listenUserMasters() {
         updateOrganizationList();
         updateFilterOrganization();
         updateLocationDatalists();
+        if (typeof ensureAdminDefaultSurvey === 'function') ensureAdminDefaultSurvey();
         if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
     }, (error) => {
         console.warn('사용자 문서 마스터 로드 실패:', error);
@@ -338,6 +339,7 @@ function listenSurveys() {
         }
         refreshVisibleViews();
         updateSurveyList();
+        if (typeof ensureAdminDefaultSurvey === 'function') ensureAdminDefaultSurvey();
     }, (error) => {
         console.warn('조사 회차 컬렉션 권한 없음, users 문서로 대체:', error);
         listenUserMasters();
@@ -451,6 +453,13 @@ async function migrateLocalOrganizations() {
 function selectSurvey(surveyId) {
     currentSurveyId = surveyId || SURVEY_ALL;
     localStorage.setItem(SURVEY_STORAGE_KEY, currentSurveyId);
+    if (typeof currentUserRole !== 'undefined' && currentUserRole === 'admin'
+        && typeof reloadAdminScopedItems === 'function') {
+        reloadAdminScopedItems({ toast: true });
+        if (typeof updateSurveySelect === 'function') updateSurveySelect();
+        if (typeof updateSurveyBanner === 'function') updateSurveyBanner();
+        return;
+    }
     refreshVisibleViews();
 }
 
@@ -458,24 +467,32 @@ function updateSurveySelect() {
     const select = document.getElementById('surveySelect');
     if (!select) return;
     const previous = currentSurveyId;
+    const isAdmin = typeof currentUserRole !== 'undefined' && currentUserRole === 'admin';
     const unassignedCount = (items || []).filter(item => !item.surveyId).length;
 
-    const options = [
-        `<option value="${SURVEY_ALL}">전체 회차</option>`
-    ];
+    const options = [];
+    if (!isAdmin) {
+        options.push(`<option value="${SURVEY_ALL}">전체 회차</option>`);
+    }
 
     surveys.forEach(survey => {
         const status = survey.status === 'closed' ? ' (마감)' : '';
         options.push(`<option value="${escapeHtml(survey.id)}">${escapeHtml(survey.name)}${status}</option>`);
     });
 
-    if (unassignedCount > 0) {
+    if (!isAdmin && unassignedCount > 0) {
         options.push(`<option value="${SURVEY_UNASSIGNED}">미분류 (기존 ${unassignedCount}건)</option>`);
     }
 
     select.innerHTML = options.join('');
     if ([...select.options].some(option => option.value === previous)) {
         select.value = previous;
+    } else if (isAdmin) {
+        const active = surveys.find((survey) => survey.status === 'active') || surveys[0];
+        const fallback = active?.id || '';
+        select.value = fallback;
+        currentSurveyId = fallback || SURVEY_ALL;
+        try { localStorage.setItem(SURVEY_STORAGE_KEY, currentSurveyId); } catch (e) { /* ignore */ }
     } else {
         select.value = SURVEY_ALL;
         currentSurveyId = SURVEY_ALL;

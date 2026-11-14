@@ -38,6 +38,132 @@ let listPage = 1;
 let lastFilteredItems = [];
 let adminFullLoadDone = false;
 let adminFullLoadPromise = null;
+let adminReloadTimer = null;
+let adminActiveScopeKey = '';
+
+function getAdminLoadScope() {
+    const surveyId = (typeof currentSurveyId !== 'undefined' && currentSurveyId)
+        ? currentSurveyId
+        : '__all__';
+    return {
+        surveyId,
+        organization: document.getElementById('filterOrganization')?.value || '',
+        dateFrom: document.getElementById('filterDateFrom')?.value || '',
+        dateTo: document.getElementById('filterDateTo')?.value || ''
+    };
+}
+
+function adminScopeKey(scope) {
+    return [scope.surveyId || '', scope.organization || '', scope.dateFrom || '', scope.dateTo || ''].join('|');
+}
+
+function isAdminServerScope(scope) {
+    if (!scope?.surveyId) return false;
+    if (scope.surveyId === '__all__' || scope.surveyId === '__unassigned__') return false;
+    return true;
+}
+
+function toFirestoreDayStart(dateStr) {
+    return firebase.firestore.Timestamp.fromDate(new Date(`${dateStr}T00:00:00`));
+}
+
+function toFirestoreDayEnd(dateStr) {
+    return firebase.firestore.Timestamp.fromDate(new Date(`${dateStr}T23:59:59.999`));
+}
+
+function buildAdminItemsQuery(scope) {
+    if (!isAdminServerScope(scope)) return null;
+    let query = db.collection('items').where('surveyId', '==', scope.surveyId);
+    if (scope.organization) {
+        query = query.where('organization', '==', scope.organization);
+    }
+    if (scope.dateFrom) {
+        query = query.where('timestamp', '>=', toFirestoreDayStart(scope.dateFrom));
+    }
+    if (scope.dateTo) {
+        query = query.where('timestamp', '<=', toFirestoreDayEnd(scope.dateTo));
+    }
+    return query.orderBy('timestamp', 'desc');
+}
+
+function resetItemListenerState() {
+    if (typeof unsubscribe === 'function') {
+        try { unsubscribe(); } catch (error) { /* ignore */ }
+    }
+    unsubscribe = null;
+    isListenerRegistered = false;
+    initialLoadComplete = false;
+    adminFullLoadDone = false;
+    adminFullLoadPromise = null;
+}
+
+function scheduleAdminScopedReload() {
+    if (currentUserRole !== 'admin') return;
+    clearTimeout(adminReloadTimer);
+    adminReloadTimer = setTimeout(() => {
+        reloadAdminScopedItems({ toast: false });
+    }, 400);
+}
+
+async function reloadAdminScopedItems(options = {}) {
+    const { toast = true } = options;
+    if (currentUserRole !== 'admin' || !currentUser || typeof db === 'undefined') return;
+
+    const scope = getAdminLoadScope();
+    const key = adminScopeKey(scope);
+    resetItemListenerState();
+    items = [];
+    adminActiveScopeKey = key;
+
+    if (scope.surveyId === '__unassigned__') {
+        if (toast) showToast('미분류는 서버 단위 조회를 지원하지 않습니다. 회차를 선택하세요', 'info');
+        filterItems();
+        if (typeof updateDashboard === 'function') updateDashboard();
+        updateItemCount();
+        return;
+    }
+
+    if (!isAdminServerScope(scope)) {
+        if (toast) showToast('관리자는 회차를 선택해야 목록을 불러옵니다', 'info');
+        filterItems();
+        if (typeof updateDashboard === 'function') updateDashboard();
+        updateItemCount();
+        return;
+    }
+
+    if (toast) {
+        const bits = [scope.surveyId];
+        if (scope.organization) bits.push(scope.organization);
+        if (scope.dateFrom || scope.dateTo) bits.push(`${scope.dateFrom || '…'}~${scope.dateTo || '…'}`);
+        showToast('선택 범위로 불러오는 중…', 'info');
+    }
+    loadItems();
+}
+
+function ensureAdminDefaultSurvey() {
+    if (currentUserRole !== 'admin') return;
+    if (typeof surveys === 'undefined' || !Array.isArray(surveys) || surveys.length === 0) return;
+
+    if (!isAdminServerScope(getAdminLoadScope())) {
+        const active = surveys.find((survey) => survey.status === 'active') || surveys[0];
+        if (!active?.id) return;
+        currentSurveyId = active.id;
+        try { localStorage.setItem('currentSurveyId', currentSurveyId); } catch (e) { /* ignore */ }
+        if (typeof updateSurveySelect === 'function') updateSurveySelect();
+        if (typeof updateSurveyBanner === 'function') updateSurveyBanner();
+        reloadAdminScopedItems({ toast: true });
+        return;
+    }
+
+    if (!isListenerRegistered && !adminFullLoadPromise) {
+        reloadAdminScopedItems({ toast: false });
+    }
+}
+
+window.reloadAdminScopedItems = reloadAdminScopedItems;
+window.ensureAdminDefaultSurvey = ensureAdminDefaultSurvey;
+window.scheduleAdminScopedReload = scheduleAdminScopedReload;
+
 
 // 🚀 Firebase 오프라인 지속성 활성화 (읽기 최적화)
 db.enablePersistence({ synchronizeTabs: true })
@@ -320,6 +446,8 @@ async function initApp() {
     document.getElementById('surveyor').value = currentUser.displayName || '';
     // 갯수 기본값 설정
     document.getElementById('quantity').value = '1';
+
+    initBackNavigation();
     
     console.log('✅ 앱 초기화 완료');
 }
@@ -521,12 +649,29 @@ function initEventListeners() {
     filterCategory.addEventListener('change', filterItems);
     const filterOrganization = document.getElementById('filterOrganization');
     const filterCondition = document.getElementById('filterCondition');
-    if (filterOrganization) filterOrganization.addEventListener('change', filterItems);
+    if (filterOrganization) {
+        filterOrganization.addEventListener('change', () => {
+            if (currentUserRole === 'admin') scheduleAdminScopedReload();
+            else filterItems();
+        });
+    }
     if (filterCondition) filterCondition.addEventListener('change', filterItems);
-    ['filterSurveyor', 'filterLocation', 'filterDateFrom', 'filterDateTo'].forEach((id) => {
+    ['filterSurveyor', 'filterLocation'].forEach((id) => {
         const el = document.getElementById(id);
         if (!el) return;
         el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', filterItems);
+    });
+    ['filterDateFrom', 'filterDateTo'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('change', () => {
+            if (currentUserRole === 'admin') scheduleAdminScopedReload();
+            else filterItems();
+        });
+        el.addEventListener('input', () => {
+            if (currentUserRole === 'admin') scheduleAdminScopedReload();
+            else filterItems();
+        });
     });
     sortBy.addEventListener('change', (e) => {
         currentSort = e.target.value;
@@ -798,19 +943,26 @@ function loadItems() {
     
     // 🔥 역할별 쿼리 생성
     if (currentUserRole === 'admin') {
-        // 👑 관리자: 전체 물품 (페이지네이션) - 기존 로직 유지
-        console.log(`👑 관리자: 전체 물품 로드 (${ADMIN_PAGE_SIZE}개씩)`);
-        
-        // 페이지네이션 UI 표시
+        const scope = getAdminLoadScope();
+        adminActiveScopeKey = adminScopeKey(scope);
+        if (!isAdminServerScope(scope)) {
+            console.log('👑 관리자: 회차 미선택 — 전체 로드를 건너뜁니다');
+            if (listLoading) listLoading.style.display = 'none';
+            filterItems();
+            if (typeof updateDashboard === 'function') updateDashboard();
+            updateItemCount();
+            return;
+        }
+
+        const scoped = buildAdminItemsQuery(scope);
+        if (!scoped) {
+            if (listLoading) listLoading.style.display = 'none';
+            return;
+        }
+
+        console.log('👑 관리자: 회차/기관/기간 범위로 로드', scope);
         showPaginationControls();
-        
-        // 관리자 쿼리 계속 진행
-        let query = db.collection('items')
-            .orderBy('timestamp', 'desc')
-            .limit(ADMIN_PAGE_SIZE);
-        
-        // 🚀 최적화된 실시간 리스너 (변경된 문서만 처리) - 관리자용
-        setupAdminRealtimeListener(query);
+        setupAdminRealtimeListener(scoped.limit(ADMIN_PAGE_SIZE));
     } else {
         // 👤 일반 사용자: 이중 쿼리 방식 사용 (userId + userEmail)
         console.log('👤 일반 사용자: 이중 쿼리 방식으로 전환');
@@ -829,12 +981,20 @@ async function loadAllAdminItems() {
     if (adminFullLoadPromise) return adminFullLoadPromise;
     if (typeof db === 'undefined' || !currentUser) return;
 
+    const scope = getAdminLoadScope();
+    if (!isAdminServerScope(scope)) {
+        adminFullLoadDone = true;
+        return;
+    }
+
     adminFullLoadPromise = (async () => {
         try {
             let cursor = null;
             const seen = new Set(items.map((item) => item.id));
             while (true) {
-                let query = db.collection('items').orderBy('timestamp', 'desc').limit(ADMIN_FETCH_BATCH);
+                let query = buildAdminItemsQuery(scope);
+                if (!query) break;
+                query = query.limit(ADMIN_FETCH_BATCH);
                 if (cursor) query = query.startAfter(cursor);
                 const snapshot = await query.get();
                 if (snapshot.empty) break;
@@ -857,9 +1017,12 @@ async function loadAllAdminItems() {
                 filterItems();
                 updateDashboard();
             }
-            console.log(`📥 관리자 전체 로드 완료: ${items.length}개`);
+            console.log(`📥 관리자 범위 로드 완료: ${items.length}개`, scope);
         } catch (error) {
-            console.warn('전체 물품 추가 로드 실패, 현재 목록으로 집계합니다:', error);
+            console.warn('범위 물품 추가 로드 실패, 현재 목록으로 집계합니다:', error);
+            if (String(error?.message || error).includes('index')) {
+                showToast('Firestore 인덱스가 필요합니다. firestore.indexes.json을 배포하세요', 'error');
+            }
             adminFullLoadPromise = null;
         }
     })();
@@ -2159,6 +2322,12 @@ async function exportExcelAll() {
         showToast('관리자만 전체 데이터를 다운로드할 수 있습니다', 'error');
         return;
     }
+
+    const exportScope = getAdminLoadScope();
+    if (!isAdminServerScope(exportScope)) {
+        showToast('엑셀 전체 다운로드는 회차 선택 후 가능합니다', 'error');
+        return;
+    }
     
     // 데이터 개수 확인 및 경고
     const estimatedCount = totalItemCount > 0 ? totalItemCount : items.length;
@@ -2206,9 +2375,9 @@ async function exportExcelAll() {
         // 배치 단위로 데이터 로드
         do {
             batchCount++;
-            let query = db.collection('items')
-                .orderBy('timestamp', 'desc')
-                .limit(BATCH_SIZE);
+            let query = buildAdminItemsQuery(exportScope);
+            if (!query) break;
+            query = query.limit(BATCH_SIZE);
             
             if (lastDoc) {
                 query = query.startAfter(lastDoc);
@@ -2984,6 +3153,89 @@ function hidePaginationControls() {
     }
 }
 
+// 스마트폰 뒤로가기: 모달/탭 우선 처리, 루트에서는 종료 확인 팝업
+let backNavInitialized = false;
+
+function pushAppHistoryGuard() {
+    try {
+        history.pushState({ appBackGuard: true }, '', location.href);
+    } catch (error) {
+        /* ignore */
+    }
+}
+
+function tryHandleBackOverlay() {
+    const progressModal = document.getElementById('progressModal');
+    if (progressModal && progressModal.style.display === 'flex') {
+        showToast('작업이 진행 중입니다', 'info');
+        return true;
+    }
+
+    const closers = [
+        { id: 'editModal', close: () => typeof closeEditModal === 'function' && closeEditModal() },
+        { id: 'fieldConfigModal', close: () => typeof closeFieldConfigModal === 'function' && closeFieldConfigModal() },
+        { id: 'manageSurveysModal', close: () => typeof closeManageSurveysModal === 'function' && closeManageSurveysModal() },
+        { id: 'addOrganizationModal', close: () => typeof closeAddOrganizationModal === 'function' && closeAddOrganizationModal() },
+        { id: 'manageOrganizationsModal', close: () => typeof closeManageOrganizationsModal === 'function' && closeManageOrganizationsModal() },
+        { id: 'registerMapModal', close: () => typeof closeRegisterMapModal === 'function' && closeRegisterMapModal() },
+        { id: 'scanModal', close: () => typeof stopAssetScan === 'function' && stopAssetScan() },
+        { id: 'usefulLifePickerModal', close: () => typeof closeUsefulLifePicker === 'function' && closeUsefulLifePicker() }
+    ];
+
+    for (const entry of closers) {
+        const el = document.getElementById(entry.id);
+        if (el && el.classList.contains('show')) {
+            entry.close();
+            return true;
+        }
+    }
+
+    const openModal = document.querySelector('.modal.show');
+    if (openModal) {
+        openModal.classList.remove('show');
+        return true;
+    }
+    return false;
+}
+
+function tryHandleBackTab() {
+    const activeBtn = document.querySelector('.tab-btn.active');
+    const activeTab = activeBtn?.dataset?.tab || '';
+    if (activeTab && activeTab !== 'dashboard') {
+        switchTab('dashboard');
+        return true;
+    }
+    return false;
+}
+
+function confirmAppExit() {
+    return window.confirm('앱을 종료하시겠습니까?');
+}
+
+function handleAppBackNavigation() {
+    if (tryHandleBackOverlay()) return 'overlay';
+    if (tryHandleBackTab()) return 'tab';
+    return confirmAppExit() ? 'exit' : 'stay';
+}
+
+function initBackNavigation() {
+    if (backNavInitialized) return;
+    backNavInitialized = true;
+    pushAppHistoryGuard();
+
+    window.addEventListener('popstate', () => {
+        const result = handleAppBackNavigation();
+        if (result === 'exit') {
+            // 가드 엔트리를 복구하지 않고 한 단계 더 뒤로 가 앱/탭을 떠남
+            setTimeout(() => {
+                try { history.back(); } catch (error) { /* ignore */ }
+            }, 0);
+            return;
+        }
+        pushAppHistoryGuard();
+    });
+}
+
 // 전역 함수로 노출
 window.openEditModal = openEditModal;
 window.deleteItem = deleteItem;
@@ -2994,3 +3246,4 @@ window.loadNextPage = loadNextPage;
 window.goToFirstPage = goToFirstPage;
 window.updateFieldContextChips = updateFieldContextChips;
 window.refreshRecentLocations = refreshRecentLocations;
+window.initBackNavigation = initBackNavigation;
