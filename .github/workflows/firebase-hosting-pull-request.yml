@@ -1,0 +1,23 @@
+# PR마다 Hosting 미리보기 채널 배포 (선택)
+name: Deploy to Firebase Hosting on PR
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build_and_preview:
+    runs-on: ubuntu-latest
+    # fork PR에서는 시크릿이 없어 실패하므로 같은 저장소 PR만 실행
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy preview channel
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_HYUNDAI_E653C }}
+          projectId: hyundai-e653c
+          expires: 7d

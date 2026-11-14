@@ -1,0 +1,23 @@
+# main 푸시 시 Firebase Hosting(live) 자동 배포
+# Spark 플랜 유지 — Hosting 배포만 수행하며 요금제를 바꾸지 않습니다.
+name: Deploy to Firebase Hosting on merge
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Firebase Hosting (live)
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_HYUNDAI_E653C }}
+          projectId: hyundai-e653c
+          channelId: live
