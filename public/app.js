@@ -213,7 +213,8 @@ auth.onAuthStateChanged(async (user) => {
             console.log(`📊 최종 확인 - 사용자 역할: ${currentUserRole}`);
         } catch (error) {
             console.error('❌ 앱 초기화 중 오류:', error);
-            showToast('앱 초기화에 실패했습니다. 페이지를 새로고침해주세요.', 'error');
+            const detail = error?.message || String(error);
+            showToast(`앱 초기화에 실패했습니다: ${detail}`, 'error');
         }
     } else {
         // 로그인 페이지로 리다이렉트
@@ -381,11 +382,12 @@ async function initApp() {
     if (typeof initOrganizations === 'function') {
         initOrganizations();
     }
+    if (typeof initBaselineRegister === 'function') {
+        // 회차 리스너보다 먼저 등록해, 캐시 스냅샷에서 setBaselineItems가 바로 동작하게 함
+        initBaselineRegister();
+    }
     if (typeof initRegister === 'function') {
         initRegister();
-    }
-    if (typeof initBaselineRegister === 'function') {
-        initBaselineRegister();
     }
     if (typeof initOfflineQueue === 'function') {
         initOfflineQueue();
@@ -446,9 +448,11 @@ async function initApp() {
     loadItems();
     
     // 조사자 이름 자동완성 (사용자 이름으로)
-    document.getElementById('surveyor').value = currentUser.displayName || '';
+    const surveyorInput = document.getElementById('surveyor');
+    if (surveyorInput) surveyorInput.value = currentUser.displayName || '';
     // 갯수 기본값 설정
-    document.getElementById('quantity').value = '1';
+    const quantityInput = document.getElementById('quantity');
+    if (quantityInput) quantityInput.value = '1';
 
     initBackNavigation();
     
