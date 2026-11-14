@@ -381,6 +381,12 @@
                         <button type="button" id="scanAssetBtn" class="btn btn-secondary btn-scan-inline">📷 스캔</button>
                     </div>
                     <div id="assetCheckBanner" class="asset-check-banner" style="display: none;"></div>
+                    <div id="baselineComparePanel" class="baseline-compare-panel" style="display: none;"></div>
+                </div>
+
+                <div class="form-group form-group-priority" data-field="holder">
+                    <label for="holder">사용자</label>
+                    <input type="text" id="holder" name="holder" placeholder="사용·관리 담당자" enterkeyhint="next" autocomplete="off">
                 </div>
 
                 <div class="form-group form-group-priority" data-field="quantity">
@@ -687,6 +693,16 @@
             </div>
 
             <div class="manage-section">
+                <h2>📂 기준(작년) 대장</h2>
+                <p>전년 등록 자산 엑셀을 <strong>현재 회차의 비교 기준</strong>으로만 올립니다. 실사는 입력 탭에서 자산번호를 넣으면 이 기준 정보를 불러와 비교·수정합니다. 금년 대장(실사 예정 목록)과는 별개입니다.</p>
+                <input type="file" id="importBaselineFile" accept=".xlsx,.xls,.csv" style="display: none;">
+                <div class="export-buttons">
+                    <button class="btn btn-primary" id="importBaselineBtn" type="button">📂 기준 대장 엑셀 올리기</button>
+                </div>
+                <p id="baselineStatus" class="baseline-status">기준 대장이 없습니다.</p>
+            </div>
+
+            <div class="manage-section">
                 <h2>🔄 RFID 취득재산 일괄등록 변환</h2>
                 <p>다른 자산대장 엑셀을 분석해 <strong>RFID_OAST</strong> 양식(8행 헤더)에 맞춰 9행부터 채운 파일을 내려받습니다. 분류·식별이 비어 있으면 목록정보(로컬 스냅샷)로 자동 채웁니다.</p>
                 <input type="file" id="rfidSourceFile" accept=".xlsx,.xls" style="display: none;">
@@ -867,7 +883,7 @@
     <div id="registerMapModal" class="modal">
         <div class="modal-content modal-wide">
             <div class="modal-header">
-                <h2>대장 열 맞추기</h2>
+                <h2 id="registerMapTitle">대장 열 맞추기</h2>
                 <button class="close-btn" id="closeRegisterMap">&times;</button>
             </div>
             <div class="modal-body">
@@ -1117,6 +1133,7 @@
     <script src="useful-life-excel.js"></script>
     <script src="useful-life-register.js"></script>
     <script src="register.js"></script>
+    <script src="baseline-register.js"></script>
     <script src="excel-form-convert.js"></script>
     
     <!-- 메인 앱 스크립트 -->

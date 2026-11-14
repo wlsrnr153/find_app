@@ -1,4 +1,4 @@
-const CACHE_NAME = 'find-app-shell-v40';
+const CACHE_NAME = 'find-app-shell-v42';
 
 // 오프라인에서도 localhost 셸이 뜨도록 핵심 자산·vendor를 미리 캐시한다
 const APP_SHELL = [
@@ -11,6 +11,7 @@ const APP_SHELL = [
     '/auth.js',
     '/masters.js',
     '/register.js',
+    '/baseline-register.js',
     '/useful-life.js',
     '/goods-catalog.js',
     '/goods-idntfc.js',

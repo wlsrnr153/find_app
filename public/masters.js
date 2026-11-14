@@ -155,6 +155,7 @@ function flattenUserMasters(docs) {
     const nextOrgs = [];
     const nextLocations = [];
     const nextRegisters = [];
+    const nextBaselines = [];
     docs.forEach((doc) => {
         const data = doc.data() || {};
         (data.surveys || []).forEach((survey) => {
@@ -174,6 +175,14 @@ function flattenUserMasters(docs) {
                 if (record && record.id) nextRegisters.push({ ...record, createdBy: record.createdBy || doc.id });
             });
         });
+        const baselineLists = [data.baselines, ...Object.keys(data)
+            .filter((key) => key.startsWith('baselineChunk_'))
+            .map((key) => data[key])];
+        baselineLists.forEach((list) => {
+            (list || []).forEach((record) => {
+                if (record && record.id) nextBaselines.push({ ...record, createdBy: record.createdBy || doc.id });
+            });
+        });
     });
     applyUsefulLifeAliasDocs(docs);
     surveys = nextSurveys.sort((a, b) => getSafeDate(b.createdAt) - getSafeDate(a.createdAt));
@@ -185,6 +194,11 @@ function flattenUserMasters(docs) {
     } else {
         window.registerItems = nextRegisters;
     }
+    if (typeof setBaselineItems === 'function') {
+        setBaselineItems(nextBaselines);
+    } else {
+        window.baselineItems = nextBaselines;
+    }
     if (typeof idbReadRegisters === 'function') {
         idbReadRegisters().then((localRows) => {
             if (!localRows.length) return;
@@ -194,6 +208,16 @@ function flattenUserMasters(docs) {
             if (typeof setRegisterItems === 'function') setRegisterItems(merged);
             else window.registerItems = merged;
             if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
+        });
+    }
+    if (typeof idbReadBaselines === 'function') {
+        idbReadBaselines().then((localRows) => {
+            if (!localRows.length) return;
+            const merged = typeof mergeBaselineLists === 'function'
+                ? mergeBaselineLists(nextBaselines, localRows)
+                : nextBaselines.concat(localRows);
+            if (typeof setBaselineItems === 'function') setBaselineItems(merged);
+            else window.baselineItems = merged;
         });
     }
 }
@@ -453,6 +477,8 @@ async function migrateLocalOrganizations() {
 function selectSurvey(surveyId) {
     currentSurveyId = surveyId || SURVEY_ALL;
     localStorage.setItem(SURVEY_STORAGE_KEY, currentSurveyId);
+    if (typeof updateBaselineStatusUi === 'function') updateBaselineStatusUi();
+    if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
     if (typeof currentUserRole !== 'undefined' && currentUserRole === 'admin'
         && typeof reloadAdminScopedItems === 'function') {
         reloadAdminScopedItems({ toast: true });

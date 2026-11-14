@@ -384,6 +384,9 @@ async function initApp() {
     if (typeof initRegister === 'function') {
         initRegister();
     }
+    if (typeof initBaselineRegister === 'function') {
+        initBaselineRegister();
+    }
     if (typeof initOfflineQueue === 'function') {
         initOfflineQueue();
     }
@@ -1767,6 +1770,7 @@ function resetFormKeepCommon() {
 }
 
 function resetFormAfterAdd() {
+    if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
     if (continuousMode) {
         resetFormKeepCommon();
         return;
@@ -1783,6 +1787,11 @@ function resetFormAfterAdd() {
     if (typeof refreshUsefulLifeUi === 'function') refreshUsefulLifeUi({ force: true });
     syncChoiceChips();
     updateFieldContextChips();
+    const assetBanner = document.getElementById('assetCheckBanner');
+    if (assetBanner) {
+        assetBanner.style.display = 'none';
+        assetBanner.textContent = '';
+    }
 }
 
 
@@ -1895,9 +1904,24 @@ async function handleAddItem(e) {
     
     try {
         const docRef = await db.collection('items').add(data);
-        if (typeof markRegisterFound === 'function' && data.assetNumber) {
+        let baselineChangeCount = 0;
+        if (typeof applyBaselineSurveyResult === 'function' && data.assetNumber) {
+            const baselineResult = await applyBaselineSurveyResult(data.assetNumber, docRef.id, data);
+            baselineChangeCount = baselineResult?.changes?.length || 0;
+            if (baselineResult?.matchedBaseline) {
+                data.baselineMatched = true;
+                if (baselineChangeCount) {
+                    await docRef.set({
+                        baselineMatched: true,
+                        baselineChangeCount,
+                        baselineChangedFields: (baselineResult.changes || []).map((c) => c.field)
+                    }, { merge: true });
+                }
+            }
+        } else if (typeof markRegisterFound === 'function' && data.assetNumber) {
             await markRegisterFound(data.assetNumber, docRef.id, { condition: data.condition });
         }
+        if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
         if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
         console.log('✅ 물품 등록 완료! 문서ID:', docRef.id);
         console.log('⏳ 실시간 리스너가 곧 이 변경사항을 감지합니다...');
@@ -1905,7 +1929,11 @@ async function handleAddItem(e) {
         console.log('   초기 로드 완료:', initialLoadComplete ? '✅ 완료' : '❌ 미완료');
         
         // 🎉 물품 등록 알림 (더 명확하게)
-        showToast(`✅ "${data.itemName || '물품'}" 등록 완료!`, 'success');
+        if (baselineChangeCount > 0) {
+            showToast(`✅ "${data.itemName || '물품'}" 등록 · 기준 대비 ${baselineChangeCount}개 항목 변경 반영`, 'success');
+        } else {
+            showToast(`✅ "${data.itemName || '물품'}" 등록 완료!`, 'success');
+        }
         
         // 브라우저 알림 (선택사항 - 권한 있을 경우)
         if ('Notification' in window && Notification.permission === 'granted') {

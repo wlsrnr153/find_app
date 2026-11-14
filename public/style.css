@@ -310,6 +310,67 @@ body.dark-mode .survey-input-banner.is-closed {
     color: #1e3a8a;
 }
 
+.baseline-compare-panel {
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid var(--gray-200);
+    background: linear-gradient(180deg, #f8fafc 0%, #fff 100%);
+}
+
+.baseline-compare-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: baseline;
+    margin-bottom: 6px;
+    font-size: 14px;
+}
+
+.baseline-compare-help,
+.baseline-compare-note {
+    margin: 0 0 10px;
+    font-size: 12px;
+    color: var(--gray-600);
+    line-height: 1.4;
+}
+
+.baseline-compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 12px;
+    margin-bottom: 10px;
+}
+
+.baseline-compare-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 12px;
+}
+
+.baseline-compare-row span {
+    color: var(--gray-500);
+}
+
+.baseline-compare-row strong {
+    color: var(--gray-900);
+    font-weight: 600;
+    word-break: break-word;
+}
+
+.baseline-status {
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--gray-600);
+}
+
+@media (max-width: 640px) {
+    .baseline-compare-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 .register-progress-card {
     background: var(--bg-primary);
     padding: 16px;
@@ -1032,6 +1093,114 @@ body.dark-mode .survey-input-banner.is-closed {
     color: var(--gray-600);
     font-size: 14px;
     margin-bottom: 15px;
+}
+
+.year-compare-status,
+.year-compare-summary {
+    color: var(--gray-700);
+    font-size: 14px;
+    margin: 8px 0 12px;
+    line-height: 1.45;
+}
+
+.year-compare-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.year-compare-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.year-compare-filters .btn.active {
+    background: var(--primary, #2563eb);
+    color: #fff;
+    border-color: transparent;
+}
+
+.year-compare-source {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--gray-700);
+}
+
+.year-compare-source select {
+    min-width: 220px;
+    padding: 6px 8px;
+}
+
+.year-compare-actions {
+    margin-bottom: 12px;
+}
+
+.year-compare-table-wrap {
+    max-height: min(55vh, 520px);
+    overflow: auto;
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+}
+
+.year-compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.year-compare-table th,
+.year-compare-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--gray-200);
+    text-align: left;
+    vertical-align: top;
+}
+
+.year-compare-table th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-primary, #fff);
+    z-index: 1;
+}
+
+.year-compare-change {
+    margin-bottom: 4px;
+    line-height: 1.35;
+}
+
+.year-compare-muted {
+    color: var(--gray-500);
+}
+
+.year-compare-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    background: var(--gray-100);
+    color: var(--gray-800);
+}
+
+.year-compare-badge.is-surveyed {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.year-compare-badge.is-register_only {
+    background: #e0e7ff;
+    color: #3730a3;
+}
+
+.year-compare-badge.is-missing,
+.year-compare-badge.is-no_asset {
+    background: #fee2e2;
+    color: #991b1b;
 }
 
 .upload-area {

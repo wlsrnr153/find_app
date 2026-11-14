@@ -104,7 +104,7 @@ const REGISTER_USERDOC_MAX_ROWS = 200;
 const REGISTER_LEAN_KEYS = [
     'id', 'surveyId', 'surveyName', 'status', 'createdBy', 'createdAt', 'sourceFile',
     'checkedBy', 'checkedByEmail', 'checkedAt', 'itemId', 'foundItemId',
-    'assetNumber', 'itemName', 'organization', 'location', 'building', 'floor', 'room',
+    'assetNumber', 'itemName', 'organization', 'holder', 'location', 'building', 'floor', 'room',
     'category', 'goodsClNo', 'goodsClNm', 'usefulLife', 'usefulLifeMatch',
     'quantity', 'acquiredAt', 'manufacturer', 'model', 'condition'
 ];
@@ -520,6 +520,7 @@ function applyRegisterToForm(record) {
     };
     setValue('itemName', record.itemName);
     setValue('organization', record.organization);
+    setValue('holder', record.holder);
     setValue('location', record.location);
     setValue('building', record.building);
     setValue('floor', record.floor);
@@ -540,6 +541,7 @@ function applyRegisterToForm(record) {
     }
     if (typeof updateLocationPreview === 'function') updateLocationPreview();
     if (typeof refreshUsefulLifeUi === 'function') refreshUsefulLifeUi({ force: true });
+    if (typeof syncChoiceChips === 'function') syncChoiceChips();
 }
 
 function updateAssetCheckBanner() {
@@ -552,18 +554,38 @@ function updateAssetCheckBanner() {
     banner.className = 'asset-check-banner';
     banner.style.display = 'none';
     banner.textContent = '';
+    if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
 
     if (!assetNumber) return;
 
+    const baseline = typeof findBaselineByAsset === 'function' ? findBaselineByAsset(assetNumber) : null;
     const register = findRegisterByAsset(assetNumber);
     const existing = findItemByAsset(assetNumber);
     const expectedCount = getRegisterForSurvey().length;
+    const baselineCount = typeof getBaselineForSurvey === 'function' ? getBaselineForSurvey().length : 0;
 
     if (existing) {
         banner.style.display = 'block';
         banner.classList.add('is-danger');
         banner.textContent = `이미 등록된 자산번호입니다. (${existing.itemName || '물품'}) 저장하면 중복으로 남습니다.`;
         pendingAssetOverride = true;
+        return;
+    }
+
+    // 기준(작년) 대장이 있으면 입력 양식에 작년 정보를 먼저 채우고 비교 패널을 연다
+    if (baseline) {
+        applyRegisterToForm(baseline);
+        if (typeof renderBaselineComparePanel === 'function') {
+            renderBaselineComparePanel(baseline, { yearRegister: register });
+        }
+        banner.style.display = 'block';
+        if (register) {
+            banner.classList.add('is-success');
+            banner.textContent = `기준 대장·금년 대장에 있는 자산입니다. 작년 정보를 채웠으니 현장을 확인한 뒤 저장하세요. (${baseline.itemName || '이름 없음'})`;
+        } else {
+            banner.classList.add('is-info');
+            banner.textContent = `기준(작년) 대장에서 찾았습니다. 정보를 확인·수정한 뒤 저장하세요. (${baseline.itemName || '이름 없음'})`;
+        }
         return;
     }
 
@@ -577,16 +599,23 @@ function updateAssetCheckBanner() {
             banner.textContent = '대장에는 있으나 미발견으로 표시된 자산입니다. 저장하면 찾음으로 바뀝니다.';
         } else {
             banner.classList.add('is-success');
-            banner.textContent = `대장에 있는 예정 자산입니다. 저장하면 "찾음"으로 처리됩니다. (${register.itemName || '이름 없음'})`;
+            banner.textContent = `금년 대장에 있는 예정 자산입니다. 저장하면 "찾음"으로 처리됩니다. (${register.itemName || '이름 없음'})`;
         }
         applyRegisterToForm(register);
+        return;
+    }
+
+    if (baselineCount > 0) {
+        banner.style.display = 'block';
+        banner.classList.add('is-info');
+        banner.textContent = '기준(작년) 대장에 없는 자산번호입니다. 신규로 저장됩니다.';
         return;
     }
 
     if (expectedCount > 0) {
         banner.style.display = 'block';
         banner.classList.add('is-info');
-        banner.textContent = '대장에 없는 자산번호입니다. 저장하면 신규 발견으로 집계됩니다.';
+        banner.textContent = '금년 대장에 없는 자산번호입니다. 저장하면 신규 발견으로 집계됩니다.';
     }
 }
 
@@ -610,6 +639,7 @@ const REGISTER_SYSTEM_FIELDS = [
     { key: 'itemName', label: '물품명', required: true, aliases: ['자산명', '물품명', '물품', '명칭', '품목명', '품목', 'name', 'item'] },
     { key: 'goodsClNm', label: '분류명', aliases: ['품명', '분류명', '물품분류명', '세부품명', '고시품명', '물품분류', 'goodsclnm', 'classname'] },
     { key: 'organization', label: '기관명', aliases: ['기관명', '기관', '조사부서', '소속', '부서', '관리부서', '사용부서', 'organization'] },
+    { key: 'holder', label: '사용자', aliases: ['사용자', '사용인', '관리책임자', '보관자', '담당자', '사용자명', 'holder', 'user', 'custodian'] },
     { key: 'location', label: '사용위치', aliases: ['사용위치', '현 사용위치', '위치', '설치위치', '보관위치', '장소', 'location'] },
     { key: 'building', label: '건물', aliases: ['건물', '동', '건물명', '단과대학', 'building'] },
     { key: 'floor', label: '층', aliases: ['층', '층수', 'floor'] },
@@ -627,502 +657,6 @@ const REGISTER_SYSTEM_FIELDS = [
 
 let pendingRegisterImport = null;
 
-function normalizeHeader(value) {
-    return String(value || '').trim().toLowerCase().replace(/[\s\-_.()\[\]]/g, '');
-}
-
-function headerSignature(headers) {
-    return headers.map(normalizeHeader).filter(Boolean).sort().join('|');
-}
-
-// 값이 없으면 1로 채우지만, 값이 있는데 범위를 벗어나면 날짜를 지어내지 않고 포기한다
-function toDateKey(year, month, day) {
-    if (!(year >= 1900 && year <= 2100)) return '';
-    const m = month === undefined ? 1 : month;
-    if (!(m >= 1 && m <= 12)) return '';
-    const lastDay = new Date(Date.UTC(year, m, 0)).getUTCDate();
-    const d = day === undefined ? 1 : day;
-    if (!(d >= 1 && d <= lastDay)) return '';
-    return `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-}
-
-// 엑셀은 취득일자를 2018-03-15, 2018. 3. 15, 2018년 3월, 20180315, 날짜 시리얼 등 제각각으로 준다.
-// 연·월만 있으면 1일로, 연도만 있으면 1월 1일로 채운다
-function parseAcquiredDate(value) {
-    if (value == null || value === '') return '';
-    // XLSX가 Date 객체를 줄 수도 있다. instanceof는 realm이 다르면 실패하므로 쓰지 않는다
-    if (Object.prototype.toString.call(value) === '[object Date]') {
-        return Number.isNaN(value.getTime()) ? '' : toDateKey(value.getFullYear(), value.getMonth() + 1, value.getDate());
-    }
-
-    const text = String(value).trim();
-    if (!text) return '';
-    const parts = text.match(/\d+/g) || [];
-    if (!parts.length) return '';
-
-    if (parts.length >= 2 && parts[0].length === 4) {
-        return toDateKey(Number(parts[0]), Number(parts[1]), parts.length >= 3 ? Number(parts[2]) : undefined);
-    }
-
-    const digits = parts.join('');
-    if (parts.length === 1) {
-        if (digits.length === 8) return toDateKey(+digits.slice(0, 4), +digits.slice(4, 6), +digits.slice(6, 8));
-        if (digits.length === 6) return toDateKey(+digits.slice(0, 4), +digits.slice(4, 6));
-        if (digits.length === 4) return toDateKey(+digits);
-    }
-
-    // 서식이 안 걸린 날짜 셀은 1899-12-30 기준 일련번호로 넘어온다
-    const serial = Number(text);
-    if (Number.isFinite(serial) && serial >= 367 && serial <= 73415) {
-        const parsed = new Date(Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000);
-        return toDateKey(parsed.getUTCFullYear(), parsed.getUTCMonth() + 1, parsed.getUTCDate());
-    }
-    return '';
-}
-
-// 세부품명번호 10자리로 들어오면 앞 8자리가 물품분류번호다
-function normalizeGoodsClNo(value) {
-    const digits = String(value || '').replace(/\D/g, '');
-    return digits.length >= 8 ? digits.slice(0, 8) : '';
-}
-
-function headerMatchesAlias(header, alias) {
-    const normalized = normalizeHeader(header);
-    const key = normalizeHeader(alias);
-    if (!normalized || !key) return false;
-    if (normalized === key) return true;
-    if (key.length < 2) return false;
-    if (normalized.startsWith(key) || (normalized.length >= 2 && key.startsWith(normalized))) return true;
-    if (key.length >= 3 && (normalized.includes(key) || (normalized.length >= 3 && key.includes(normalized)))) return true;
-    return false;
-}
-
-const LIST_HEADER_HINTS = ['자산번호', '자산명', '품명', '물품명', '관리번호', '사용위치', '취득', '수량', '규격', '분류', '소속', '순번', 'rfid', '식별', '취득일자', '조사부서'];
-
-function filledCells(row) {
-    return (row || []).map((cell) => String(cell ?? '').trim()).filter(Boolean);
-}
-
-function isEmptyRow(row) {
-    return filledCells(row).length === 0;
-}
-
-function isTitleOrMemoRow(row) {
-    const cells = filledCells(row);
-    if (cells.length === 0) return true;
-    if (cells.length <= 2 && cells.some((cell) => cell.length >= 18)) return true;
-    if (cells.some((cell) => /기준\s*:|작성일|메모|참고|합계|총계/.test(cell))) return true;
-    return false;
-}
-
-function looksLikeSeqNumber(row) {
-    const first = String(row?.[0] ?? '').trim().replace(/,/g, '');
-    return /^\d+$/.test(first);
-}
-
-function isHeaderLike(row) {
-    if (looksLikeSeqNumber(row)) return false;
-    const cells = filledCells(row);
-    if (cells.length < 4) return false;
-    const labels = cells.filter((cell) => /[가-힣a-zA-Z]/.test(cell) && !/^\d[\d,]*$/.test(cell) && cell.length <= 24);
-    const hints = cells.filter((cell) => LIST_HEADER_HINTS.some((hint) => normalizeHeader(cell).includes(normalizeHeader(hint)))).length;
-    return labels.length >= 4 && hints >= 1;
-}
-
-function isDataLike(row, headerFillCount) {
-    const cells = filledCells(row);
-    if (cells.length < 2) return false;
-    const first = String(row?.[0] ?? '').trim().replace(/,/g, '');
-    const sequential = /^\d+$/.test(first);
-    const wideEnough = cells.length >= Math.max(2, Math.floor((headerFillCount || 4) * 0.25));
-    return sequential || wideEnough;
-}
-
-function countConsecutiveDataRows(table, headerIndex) {
-    const headerFill = filledCells(table[headerIndex]).length;
-    let run = 0;
-    let skippedEmpty = 0;
-    for (let i = headerIndex + 1; i < table.length; i += 1) {
-        if (isEmptyRow(table[i])) {
-            if (run === 0) continue;
-            skippedEmpty += 1;
-            if (skippedEmpty > 2) break;
-            continue;
-        }
-        skippedEmpty = 0;
-        if (isHeaderLike(table[i]) && run > 20) break;
-        if (isDataLike(table[i], headerFill)) run += 1;
-        else if (run > 5) break;
-        else if (isTitleOrMemoRow(table[i]) && run === 0) continue;
-        else break;
-    }
-    return run;
-}
-
-function findListStart(table) {
-    let best = { index: 0, score: -1, run: 0 };
-    const limit = Math.min(table.length, 40);
-    for (let i = 0; i < limit; i += 1) {
-        if (!isHeaderLike(table[i])) continue;
-        const run = countConsecutiveDataRows(table, i);
-        const hints = filledCells(table[i]).filter((cell) =>
-            LIST_HEADER_HINTS.some((hint) => normalizeHeader(cell).includes(normalizeHeader(hint)))
-        ).length;
-        const score = run * 3 + hints * 25;
-        if (score > best.score) best = { index: i, score, run };
-    }
-    if (best.score < 0) {
-        return { index: detectHeaderRowFallback(table), run: 0 };
-    }
-    return best;
-}
-
-function detectHeaderRowFallback(table) {
-    let best = { index: 0, score: -1 };
-    const limit = Math.min(table.length, 20);
-    for (let i = 0; i < limit; i += 1) {
-        const cells = filledCells(table[i]);
-        const unique = new Set(cells.map(normalizeHeader));
-        const textLike = cells.filter((cell) => /[가-힣a-zA-Z]/.test(cell)).length;
-        const score = unique.size * 2 + textLike;
-        if (score > best.score) best = { index: i, score };
-    }
-    return best.index;
-}
-
-function rowsFromHeader(table, headerIndex) {
-    const uniqueHeaders = [];
-    (table[headerIndex] || []).forEach((cell, index) => {
-        const raw = String(cell || '').trim();
-        const name = raw || `열${index + 1}`;
-        uniqueHeaders[index] = uniqueHeaders.includes(name) ? `${name}_${index + 1}` : name;
-    });
-    const rows = table.slice(headerIndex + 1).map((line) => {
-        const row = {};
-        uniqueHeaders.forEach((header, index) => {
-            row[header] = String(line?.[index] ?? '').trim();
-        });
-        return row;
-    }).filter((row) => Object.values(row).some((value) => value));
-    return {
-        headers: uniqueHeaders.filter(Boolean),
-        rows
-    };
-}
-
-function analyzeRegisterSheet(workbook, preferredSheet) {
-    const sheetNames = workbook.SheetNames || [];
-    const analyses = sheetNames.map((sheetName) => {
-        const table = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '', raw: false });
-        const start = table.length ? findListStart(table) : { index: 0, run: 0, score: -1 };
-        const extracted = table.length ? rowsFromHeader(table, start.index) : { headers: [], rows: [] };
-        const hintScore = extracted.headers.filter((header) =>
-            LIST_HEADER_HINTS.some((hint) => normalizeHeader(header).includes(normalizeHeader(hint)))
-        ).length;
-        return {
-            sheetName,
-            headerIndex: start.index,
-            run: start.run || extracted.rows.length,
-            score: extracted.rows.length * 2 + (start.run || 0) * 2 + hintScore * 30,
-            headers: extracted.headers,
-            rows: extracted.rows
-        };
-    }).filter((sheet) => sheet.headers.length && sheet.rows.length);
-
-    if (!analyses.length) throw new Error('목록으로 볼 시트를 찾지 못했습니다');
-
-    const selected = analyses.find((sheet) => sheet.sheetName === preferredSheet)
-        || analyses.slice().sort((a, b) => b.score - a.score)[0];
-
-    return {
-        ...selected,
-        analyses,
-        sheets: analyses.map((sheet) => ({
-            name: sheet.sheetName,
-            rows: sheet.rows.length,
-            headerIndex: sheet.headerIndex,
-            score: sheet.score
-        }))
-    };
-}
-
-function headerFillRate(rows, header) {
-    if (!header || !rows.length) return 0;
-    const sample = rows.slice(0, 80);
-    let filled = 0;
-    sample.forEach((row) => {
-        if (String(row[header] || '').trim()) filled += 1;
-    });
-    return filled / sample.length;
-}
-
-function suggestRegisterMapping(headers, savedProfile, rows = []) {
-    const mapping = {};
-    const used = new Set();
-    if (savedProfile?.mapping) {
-        REGISTER_SYSTEM_FIELDS.forEach((field) => {
-            const saved = savedProfile.mapping[field.key];
-            if (saved && headers.includes(saved)) {
-                mapping[field.key] = saved;
-                used.add(saved);
-            }
-        });
-    }
-    REGISTER_SYSTEM_FIELDS.forEach((field) => {
-        if (mapping[field.key]) return;
-        const candidates = headers.filter((header) => {
-            if (used.has(header)) return false;
-            return field.aliases.some((alias) => headerMatchesAlias(header, alias));
-        });
-        if (!candidates.length) return;
-        const aliasRank = (header) => {
-            const index = field.aliases.findIndex((alias) => headerMatchesAlias(header, alias));
-            return index === -1 ? 99 : index;
-        };
-        const hit = candidates.slice().sort((a, b) => {
-            const fillDiff = headerFillRate(rows, b) - headerFillRate(rows, a);
-            if (Math.abs(fillDiff) > 0.1) return fillDiff;
-            return aliasRank(a) - aliasRank(b);
-        })[0];
-        mapping[field.key] = hit;
-        used.add(hit);
-    });
-    return mapping;
-}
-
-function applyRegisterMapping(rows, mapping) {
-    const keepExtra = rows.length <= 400;
-    return rows.map((row) => {
-        const mapped = {};
-        REGISTER_SYSTEM_FIELDS.forEach((field) => {
-            const header = mapping[field.key];
-            mapped[field.key] = header ? String(row[header] || '').trim() : '';
-        });
-        if (keepExtra) {
-            const extra = {};
-            Object.keys(row).forEach((header) => {
-                if (!Object.values(mapping).includes(header) && row[header]) {
-                    extra[header] = row[header];
-                }
-            });
-            if (Object.keys(extra).length) mapped.extra = extra;
-        }
-        if (!mapped.location) {
-            mapped.location = [mapped.building, mapped.floor, mapped.room].filter(Boolean).join(' ');
-        }
-        if (!mapped.quantity) mapped.quantity = '1';
-        // 품명만 있고 자산명이 비면 물품명으로 쓴다. 반대는 하지 않아 두 정보를 지킨다
-        if (!mapped.itemName && mapped.goodsClNm) mapped.itemName = mapped.goodsClNm;
-        const rawGoodsCl = mapped.goodsClNo;
-        mapped.goodsClNo = normalizeGoodsClNo(rawGoodsCl);
-        // 분류번호 열을 goodsClNo가 가져가도 기존 분류 표시가 비지 않게 한다
-        if (!mapped.category && rawGoodsCl) mapped.category = rawGoodsCl;
-        mapped.acquiredAt = parseAcquiredDate(mapped.acquiredAt);
-        // 내용연수: 숫자 / 「미고시」 / 공란
-        const lifeRaw = String(mapped.usefulLife || '').trim();
-        if (!lifeRaw) {
-            delete mapped.usefulLife;
-        } else if (lifeRaw === '미고시') {
-            mapped.usefulLife = 0;
-            mapped.usefulLifeMatch = 'import-unnotified';
-        } else if (/^\d+(\.\d+)?$/.test(lifeRaw)) {
-            mapped.usefulLife = Number(lifeRaw);
-            mapped.usefulLifeMatch = mapped.usefulLifeMatch || 'import';
-        } else {
-            delete mapped.usefulLife;
-        }
-        return mapped;
-    }).filter((row) => row.assetNumber || row.itemName);
-}
-
-async function loadMappingProfiles() {
-    if (!currentUser) return [];
-    try {
-        const doc = await db.collection('users').doc(currentUser.uid).get();
-        return Array.isArray(doc.data()?.registerMappings) ? doc.data().registerMappings : [];
-    } catch (error) {
-        console.warn('매핑 프로필 로드 실패:', error);
-        return JSON.parse(localStorage.getItem('registerMappings') || '[]');
-    }
-}
-
-async function saveMappingProfile(profile) {
-    const existing = await loadMappingProfiles();
-    const previous = existing.find((item) => item.headerSignature === profile.headerSignature);
-    const next = [
-        {
-            ...profile,
-            usedCount: (previous?.usedCount || 0) + 1,
-            lastUsed: new Date().toISOString()
-        },
-        ...existing.filter((item) => item.headerSignature !== profile.headerSignature)
-    ].slice(0, 20);
-    try {
-        await db.collection('users').doc(currentUser.uid).set({ registerMappings: next }, { merge: true });
-    } catch (error) {
-        console.warn('매핑 프로필 저장 실패, 로컬에 보관:', error);
-        localStorage.setItem('registerMappings', JSON.stringify(next));
-    }
-}
-
-function applyPendingSheet(sheetName) {
-    const pending = pendingRegisterImport;
-    if (!pending?.analyses) return;
-    const sheet = pending.analyses.find((item) => item.sheetName === sheetName);
-    if (!sheet) return;
-    pending.sheetName = sheet.sheetName;
-    pending.headerIndex = sheet.headerIndex;
-    pending.headers = sheet.headers;
-    pending.rows = sheet.rows;
-    pending.run = sheet.run;
-    const signature = headerSignature(sheet.headers);
-    pending.profile = (pending.profiles || []).find((item) => item.headerSignature === signature) || null;
-    pending.mapping = suggestRegisterMapping(sheet.headers, pending.profile, sheet.rows);
-    renderRegisterMappingModal();
-}
-
-function renderRegisterMappingModal() {
-    const pending = pendingRegisterImport;
-    if (!pending) return;
-    const summary = document.getElementById('registerMapSummary');
-    const profileEl = document.getElementById('registerMapProfile');
-    const fields = document.getElementById('registerMapFields');
-    const preview = document.getElementById('registerMapPreview');
-    const sheetWrap = document.getElementById('registerSheetWrap');
-    const sheetSelect = document.getElementById('registerSheetSelect');
-    if (!summary || !fields || !preview) return;
-
-    const startHint = pending.run > 20
-        ? `연속 목록 ${pending.run}행`
-        : `목록 ${pending.rows.length}행`;
-    summary.textContent = `"${pending.fileName}" · ${pending.sheetName} · 제목행 ${pending.headerIndex + 1}번째 · ${startHint} · 열 ${pending.headers.length}개`;
-
-    if (sheetWrap && sheetSelect && pending.analyses?.length > 1) {
-        sheetWrap.style.display = 'flex';
-        sheetSelect.innerHTML = pending.analyses.map((sheet) =>
-            `<option value="${escapeHtml(sheet.sheetName)}">${escapeHtml(sheet.sheetName)} (${sheet.rows.length}건)</option>`
-        ).join('');
-        sheetSelect.value = pending.sheetName;
-        sheetSelect.onchange = () => applyPendingSheet(sheetSelect.value);
-    } else if (sheetWrap) {
-        sheetWrap.style.display = 'none';
-    }
-
-    if (pending.profile) {
-        profileEl.style.display = 'block';
-        profileEl.textContent = `이전에 같은 열 구성의 대장을 ${pending.profile.usedCount || 1}번 맞춘 기록이 있어 그대로 제안합니다.`;
-    } else {
-        profileEl.style.display = 'none';
-    }
-
-    const options = ['<option value="">맞추지 않음</option>']
-        .concat(pending.headers.map((header) => `<option value="${escapeHtml(header)}">${escapeHtml(header)}</option>`))
-        .join('');
-
-    fields.innerHTML = REGISTER_SYSTEM_FIELDS.map((field) => {
-        const sampleHeader = pending.mapping[field.key];
-        const sample = sampleHeader ? pending.rows.find((row) => row[sampleHeader])?.[sampleHeader] : '';
-        return `
-            <div class="register-map-row">
-                <label>${escapeHtml(field.label)}${field.required ? ' *' : ''}</label>
-                <select data-map-field="${field.key}">${options}</select>
-                <span class="register-map-sample">${sample ? `예: ${escapeHtml(sample)}` : '샘플 없음'}</span>
-            </div>
-        `;
-    }).join('');
-
-    fields.querySelectorAll('select[data-map-field]').forEach((select) => {
-        select.value = pending.mapping[select.dataset.mapField] || '';
-        select.addEventListener('change', (e) => {
-            pending.mapping[e.target.dataset.mapField] = e.target.value;
-            renderRegisterMappingModal();
-        });
-    });
-
-    const mappedRows = applyRegisterMapping(pending.rows.slice(0, 3), pending.mapping);
-    if (mappedRows.length === 0) {
-        preview.innerHTML = '<p class="register-empty">자산번호 또는 물품명이 연결된 행이 없습니다.</p>';
-        return;
-    }
-    preview.innerHTML = `
-        <table class="register-preview-table">
-            <thead>
-                <tr>
-                    <th>자산번호</th>
-                    <th>물품명</th>
-                    <th>위치</th>
-                    <th>상태</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${mappedRows.map((row) => `
-                    <tr>
-                        <td>${escapeHtml(row.assetNumber || '-')}</td>
-                        <td>${escapeHtml(row.itemName || '-')}</td>
-                        <td>${escapeHtml(row.location || '-')}</td>
-                        <td>${escapeHtml(row.condition || '-')}</td>
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>
-    `;
-}
-
-function openRegisterMapModal() {
-    const modal = document.getElementById('registerMapModal');
-    if (!modal) return;
-    renderRegisterMappingModal();
-    modal.classList.add('show');
-    document.body.style.overflow = 'hidden';
-}
-
-function closeRegisterMapModal() {
-    const modal = document.getElementById('registerMapModal');
-    if (modal) modal.classList.remove('show');
-    document.body.style.overflow = 'auto';
-    pendingRegisterImport = null;
-}
-
-async function handleRegisterImport(file) {
-    const survey = typeof getWritableSurvey === 'function' ? getWritableSurvey() : getCurrentSurvey();
-    if (!survey || survey.isFallback || !survey.id) {
-        showToast('대장을 올리려면 진행 중인 조사 회차를 먼저 선택하세요', 'error');
-        return;
-    }
-    if (!file) return;
-
-    try {
-        const data = await file.arrayBuffer();
-        const workbook = XLSX.read(data, { type: 'array' });
-        const analyzed = analyzeRegisterSheet(workbook);
-        if (!analyzed.headers.length || analyzed.rows.length === 0) {
-            showToast('제목 행이나 데이터 행을 찾지 못했습니다', 'error');
-            return;
-        }
-        const profiles = await loadMappingProfiles();
-        const signature = headerSignature(analyzed.headers);
-        const profile = profiles.find((item) => item.headerSignature === signature);
-        pendingRegisterImport = {
-            fileName: file.name,
-            survey,
-            analyses: analyzed.analyses,
-            sheets: analyzed.sheets,
-            sheetName: analyzed.sheetName,
-            headerIndex: analyzed.headerIndex,
-            headers: analyzed.headers,
-            rows: analyzed.rows,
-            run: analyzed.run,
-            profiles,
-            mapping: suggestRegisterMapping(analyzed.headers, profile, analyzed.rows),
-            profile
-        };
-        openRegisterMapModal();
-    } catch (error) {
-        console.error('대장 분석 실패:', error);
-        showToast('대장 파일을 분석하지 못했습니다', 'error');
-    }
-}
-
 async function confirmRegisterMapping() {
     const pending = pendingRegisterImport;
     if (!pending) return;
@@ -1133,6 +667,57 @@ async function confirmRegisterMapping() {
     const rows = applyRegisterMapping(pending.rows, pending.mapping);
     if (rows.length === 0) {
         showToast('맞춘 열 기준으로 가져올 행이 없습니다', 'error');
+        return;
+    }
+
+    if (pending.purpose === 'baseline') {
+        if (!pending.mapping.assetNumber) {
+            showToast('기준 대장에는 자산번호 열이 필요합니다', 'error');
+            return;
+        }
+        const baselineRecords = rows.map((row) => ({
+            id: newMasterId('bl'),
+            surveyId: pending.survey.id,
+            surveyName: pending.survey.name,
+            status: 'baseline',
+            createdBy: currentUser.uid,
+            createdAt: new Date().toISOString(),
+            sourceFile: pending.fileName,
+            isBaseline: true,
+            ...row
+        }));
+        try {
+            if (typeof saveBaselinesForSurvey !== 'function') {
+                showToast('기준 대장 모듈을 불러오지 못했습니다', 'error');
+                return;
+            }
+            const saved = await saveBaselinesForSurvey(pending.survey.id, baselineRecords);
+            await saveMappingProfile({
+                id: newMasterId('map'),
+                headerSignature: headerSignature(pending.headers),
+                headers: pending.headers,
+                mapping: pending.mapping,
+                fileName: pending.fileName,
+                sheetName: pending.sheetName
+            });
+            closeRegisterMapModal();
+            if (saved?.stored === 'local') {
+                showToast(`기준 대장 ${baselineRecords.length}건을 이 기기에 저장했습니다`, 'success');
+            } else {
+                showToast(`기준(작년) 대장 ${baselineRecords.length}건을 현재 회차에 저장했습니다. 입력 탭에서 자산번호로 조회하세요`, 'success');
+            }
+            if (typeof updateBaselineStatusUi === 'function') updateBaselineStatusUi();
+            if (typeof switchTab === 'function') {
+                setTimeout(() => {
+                    if (confirm('기준 대장을 저장했습니다.\n입력 탭으로 이동해 실사를 시작할까요?')) {
+                        switchTab('input');
+                    }
+                }, 300);
+            }
+        } catch (error) {
+            console.error('기준 대장 저장 실패:', error);
+            showToast('기준 대장 저장에 실패했습니다', 'error');
+        }
         return;
     }
 
@@ -1697,7 +1282,7 @@ function initRegister() {
         importBtn.addEventListener('click', () => importFile.click());
         importFile.addEventListener('change', (e) => {
             const file = e.target.files?.[0];
-            handleRegisterImport(file);
+            handleRegisterImport(file, 'import');
             e.target.value = '';
         });
     }
