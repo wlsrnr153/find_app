@@ -1664,6 +1664,12 @@ function applyScannedAsset(text) {
     input.value = String(text || '').trim();
     updateAssetCheckBanner();
     showToast(`자산번호 ${input.value}를 잡았습니다`, 'success');
+    const itemName = document.getElementById('itemName');
+    if (itemName && !itemName.value.trim()) {
+        setTimeout(() => itemName.focus(), 150);
+    } else {
+        setTimeout(() => input.focus(), 150);
+    }
 }
 
 function initRegister() {
@@ -1778,5 +1784,6 @@ window.markRegisterFound = markRegisterFound;
 window.fillFromRegister = fillFromRegister;
 window.markRegisterMissing = markRegisterMissing;
 window.initRegister = initRegister;
+window.startAssetScan = startAssetScan;
 window.getRegisterProgress = getRegisterProgress;
 window.findRegisterByAsset = findRegisterByAsset;

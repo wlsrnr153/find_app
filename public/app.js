@@ -8,7 +8,10 @@ let currentEditId = null;
 let unsubscribe = null;
 let currentSort = 'newest';
 let continuousMode = false;
-let selectedFields = ['surveyor', 'organization', 'location', 'itemName', 'acquiredAt', 'usefulLife', 'assetNumber', 'quantity'];
+let contextEditing = false;
+const FIELD_MODE_CORE = ['surveyor', 'organization', 'location', 'itemName', 'assetNumber', 'quantity'];
+const FIELD_MODE_OPTIONAL = ['acquiredAt', 'usefulLife', 'category', 'manufacturer', 'model', 'dimensions', 'color', 'material', 'condition', 'notes'];
+let selectedFields = [...FIELD_MODE_CORE];
 let organizations = [];
 let currentOrganization = '';
 
@@ -418,6 +421,12 @@ function switchTab(tabName) {
     
     document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
     document.getElementById(tabName).classList.add('active');
+    document.body.classList.toggle('tab-input-active', tabName === 'input');
+    if (tabName === 'input') {
+        updateFieldContextChips();
+        refreshRecentLocations();
+        syncChoiceChips();
+    }
     
     if (tabName === 'dashboard') {
         updateDashboard();
@@ -1205,9 +1214,65 @@ function updateItemCount() {
     } else {
         itemCount.textContent = `${prefix} ${visibleCount}개 물품`;
     }
+    if (typeof refreshRecentLocations === 'function') refreshRecentLocations();
 }
 
-// 연속 등록 모드 초기화
+// 현장 입력 모드 초기화
+function preferFieldModeByDefault() {
+    try {
+        if (localStorage.getItem('fieldMode') != null) {
+            return localStorage.getItem('fieldMode') === '1';
+        }
+    } catch (e) { /* ignore */ }
+    return window.matchMedia && window.matchMedia('(max-width: 767px)').matches;
+}
+
+function persistFieldMode() {
+    try {
+        localStorage.setItem('fieldMode', continuousMode ? '1' : '0');
+        localStorage.setItem('fieldModeFields', JSON.stringify(selectedFields));
+    } catch (e) { /* ignore */ }
+}
+
+function loadFieldModePrefs() {
+    try {
+        const savedFields = JSON.parse(localStorage.getItem('fieldModeFields') || 'null');
+        if (Array.isArray(savedFields) && savedFields.length) {
+            selectedFields = Array.from(new Set(['surveyor', 'itemName', ...savedFields]));
+        }
+    } catch (e) { /* ignore */ }
+}
+
+function setFieldMode(enabled, { toast = true } = {}) {
+    continuousMode = !!enabled;
+    const toggle = document.getElementById('continuousModeToggle');
+    const configBtn = document.getElementById('configureFieldsBtn');
+    if (toggle) toggle.checked = continuousMode;
+    if (configBtn) configBtn.style.display = continuousMode ? 'block' : 'none';
+    document.body.classList.toggle('field-mode', continuousMode);
+    if (!continuousMode) {
+        contextEditing = false;
+        document.body.classList.remove('context-editing');
+        showAllFields();
+    } else {
+        applyFieldVisibility();
+        updateMoreFieldsVisibility();
+    }
+    updateSubmitButtonLabel();
+    updateFieldContextChips();
+    refreshRecentLocations();
+    persistFieldMode();
+    if (toast) {
+        showToast(continuousMode ? '현장 입력 모드 켜짐' : '전체 입력 모드', 'success');
+    }
+}
+
+function updateSubmitButtonLabel() {
+    const btn = document.getElementById('submitItemBtn');
+    if (!btn) return;
+    btn.textContent = continuousMode ? '✅ 저장 후 다음' : '✅ 저장';
+}
+
 function initContinuousMode() {
     const toggle = document.getElementById('continuousModeToggle');
     const configBtn = document.getElementById('configureFieldsBtn');
@@ -1215,131 +1280,304 @@ function initContinuousMode() {
     const closeFieldConfig = document.getElementById('closeFieldConfig');
     const applyFieldConfig = document.getElementById('applyFieldConfig');
     const cancelFieldConfig = document.getElementById('cancelFieldConfig');
-    
-    // 토글 이벤트
-    toggle.addEventListener('change', (e) => {
-        continuousMode = e.target.checked;
-        configBtn.style.display = continuousMode ? 'block' : 'none';
-        
-        if (continuousMode) {
-            showToast('연속 등록 모드 활성화', 'success');
-            applyFieldVisibility();
-        } else {
-            showToast('연속 등록 모드 비활성화', 'success');
-            showAllFields();
-        }
+
+    loadFieldModePrefs();
+    setFieldMode(preferFieldModeByDefault(), { toast: false });
+
+    toggle?.addEventListener('change', (e) => {
+        setFieldMode(e.target.checked);
     });
-    
-    // 항목 선택 버튼
-    configBtn.addEventListener('click', () => {
-        openFieldConfigModal();
-    });
-    
-    // 모달 닫기
-    closeFieldConfig.addEventListener('click', closeFieldConfigModal);
-    cancelFieldConfig.addEventListener('click', closeFieldConfigModal);
-    
-    // 적용 버튼
-    applyFieldConfig.addEventListener('click', () => {
+
+    configBtn?.addEventListener('click', () => openFieldConfigModal());
+    closeFieldConfig?.addEventListener('click', closeFieldConfigModal);
+    cancelFieldConfig?.addEventListener('click', closeFieldConfigModal);
+    applyFieldConfig?.addEventListener('click', () => {
         saveFieldConfig();
         closeFieldConfigModal();
         applyFieldVisibility();
+        updateMoreFieldsVisibility();
+        persistFieldMode();
         showToast('항목 설정이 적용되었습니다', 'success');
     });
-    
-    // 모달 외부 클릭
-    fieldConfigModal.addEventListener('click', (e) => {
-        if (e.target === fieldConfigModal) {
-            closeFieldConfigModal();
+    fieldConfigModal?.addEventListener('click', (e) => {
+        if (e.target === fieldConfigModal) closeFieldConfigModal();
+    });
+
+    document.getElementById('unlockContextBtn')?.addEventListener('click', () => {
+        contextEditing = !contextEditing;
+        document.body.classList.toggle('context-editing', contextEditing);
+        if (contextEditing) {
+            showToast('공통값을 수정한 뒤 다시 ✏️을 누르세요', 'info');
+            document.querySelector('[data-context-field="location"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+            updateFieldContextChips();
+            showToast('공통값 잠금', 'success');
         }
+    });
+
+    document.querySelectorAll('.field-chip[data-chip]').forEach((chip) => {
+        chip.addEventListener('click', () => {
+            if (!continuousMode) return;
+            contextEditing = true;
+            document.body.classList.add('context-editing');
+            const key = chip.dataset.chip;
+            const target = document.querySelector(`[data-context-field="${key}"]`);
+            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const focusId = key === 'location' ? 'building' : key;
+            setTimeout(() => document.getElementById(focusId)?.focus(), 250);
+        });
+    });
+
+    ['surveyor', 'organization', 'building', 'floor', 'room'].forEach((id) => {
+        document.getElementById(id)?.addEventListener('input', updateFieldContextChips);
+        document.getElementById(id)?.addEventListener('change', updateFieldContextChips);
+    });
+
+    initQuantityStepper();
+    initChoiceChips();
+    initScanPrimary();
+}
+
+function initScanPrimary() {
+    const btn = document.getElementById('scanPrimaryBtn');
+    if (!btn || btn.dataset.bound) return;
+    btn.dataset.bound = 'true';
+    btn.addEventListener('click', () => {
+        if (typeof startAssetScan === 'function') startAssetScan();
+        else document.getElementById('scanAssetBtn')?.click();
     });
 }
 
-// 항목 선택 모달 열기
+function initQuantityStepper() {
+    const input = document.getElementById('quantity');
+    const minus = document.getElementById('qtyMinus');
+    const plus = document.getElementById('qtyPlus');
+    if (!input || input.dataset.stepperBound) return;
+    input.dataset.stepperBound = 'true';
+    const setQty = (n) => {
+        const next = Math.max(1, Number.isFinite(n) ? n : 1);
+        input.value = String(next);
+    };
+    minus?.addEventListener('click', () => setQty(parseInt(input.value || '1', 10) - 1));
+    plus?.addEventListener('click', () => setQty(parseInt(input.value || '1', 10) + 1));
+}
+
+function syncChoiceChips() {
+    document.querySelectorAll('.choice-chips[data-choice-for]').forEach((group) => {
+        const select = document.getElementById(group.dataset.choiceFor);
+        const value = select?.value || '';
+        group.querySelectorAll('.choice-chip').forEach((chip) => {
+            chip.classList.toggle('is-active', (chip.dataset.value || '') === value);
+        });
+    });
+}
+
+function initChoiceChips() {
+    document.querySelectorAll('.choice-chips[data-choice-for]').forEach((group) => {
+        if (group.dataset.bound) return;
+        group.dataset.bound = 'true';
+        const select = document.getElementById(group.dataset.choiceFor);
+        group.addEventListener('click', (e) => {
+            const chip = e.target.closest('.choice-chip');
+            if (!chip) return;
+            if (select) {
+                select.value = chip.dataset.value || '';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            syncChoiceChips();
+        });
+        select?.addEventListener('change', syncChoiceChips);
+    });
+    syncChoiceChips();
+}
+
+function truncateChip(value, max = 18) {
+    const s = String(value || '').trim();
+    if (!s) return '-';
+    return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+function updateFieldContextChips() {
+    const bar = document.getElementById('fieldContextBar');
+    if (!bar) return;
+    bar.hidden = !continuousMode;
+
+    const surveyor = document.getElementById('surveyor')?.value?.trim() || '-';
+    const org = document.getElementById('organization')?.value?.trim()
+        || document.getElementById('organizationSelect')?.value?.trim()
+        || '-';
+    const location = [
+        document.getElementById('building')?.value,
+        document.getElementById('floor')?.value,
+        document.getElementById('room')?.value
+    ].map((v) => String(v || '').trim()).filter(Boolean).join(' / ') || '-';
+
+    const chipSurveyor = document.getElementById('chipSurveyor');
+    const chipOrg = document.getElementById('chipOrganization');
+    const chipLoc = document.getElementById('chipLocation');
+    if (chipSurveyor) chipSurveyor.textContent = `조사자 · ${truncateChip(surveyor)}`;
+    if (chipOrg) chipOrg.textContent = `기관 · ${truncateChip(org)}`;
+    if (chipLoc) chipLoc.textContent = `위치 · ${truncateChip(location, 22)}`;
+}
+
+function refreshRecentLocations() {
+    const wrap = document.getElementById('recentLocations');
+    const list = document.getElementById('recentLocationsList');
+    if (!wrap || !list) return;
+    if (!continuousMode) {
+        wrap.hidden = true;
+        return;
+    }
+
+    const seen = new Set();
+    const recent = [];
+    const source = Array.isArray(items) ? items : [];
+    for (let i = source.length - 1; i >= 0 && recent.length < 6; i -= 1) {
+        const it = source[i] || {};
+        const building = (it.building || '').trim();
+        const floor = (it.floor || '').trim();
+        const room = (it.room || '').trim();
+        const label = [building, floor, room].filter(Boolean).join(' / ');
+        if (!label || seen.has(label)) continue;
+        seen.add(label);
+        recent.push({ building, floor, room, label });
+    }
+
+    if (!recent.length) {
+        wrap.hidden = true;
+        list.innerHTML = '';
+        return;
+    }
+
+    wrap.hidden = false;
+    list.innerHTML = recent.map((loc) => (
+        `<button type="button" class="recent-location-chip" data-building="${escapeAttr(loc.building)}" data-floor="${escapeAttr(loc.floor)}" data-room="${escapeAttr(loc.room)}">${escapeHtml(loc.label)}</button>`
+    )).join('');
+
+    list.querySelectorAll('.recent-location-chip').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const buildingEl = document.getElementById('building');
+            const floorEl = document.getElementById('floor');
+            const roomEl = document.getElementById('room');
+            if (buildingEl) buildingEl.value = btn.dataset.building || '';
+            if (floorEl) floorEl.value = btn.dataset.floor || '';
+            if (roomEl) roomEl.value = btn.dataset.room || '';
+            if (typeof updateLocationPreview === 'function') updateLocationPreview();
+            updateFieldContextChips();
+            showToast(`위치 적용: ${btn.textContent}`, 'success');
+        });
+    });
+}
+
+function escapeAttr(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;');
+}
+
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 function openFieldConfigModal() {
     const modal = document.getElementById('fieldConfigModal');
     const checkboxes = modal.querySelectorAll('.field-checkbox');
-    
-    // 현재 선택된 항목 체크
-    checkboxes.forEach(checkbox => {
-        if (!checkbox.disabled) {
-            checkbox.checked = selectedFields.includes(checkbox.value);
-        }
+    checkboxes.forEach((checkbox) => {
+        if (!checkbox.disabled) checkbox.checked = selectedFields.includes(checkbox.value);
     });
-    
     modal.classList.add('show');
     document.body.style.overflow = 'hidden';
 }
 
-// 항목 선택 모달 닫기
 function closeFieldConfigModal() {
     const modal = document.getElementById('fieldConfigModal');
     modal.classList.remove('show');
     document.body.style.overflow = 'auto';
 }
 
-// 선택된 항목 저장
 function saveFieldConfig() {
     const checkboxes = document.querySelectorAll('.field-checkbox:not(:disabled)');
-    selectedFields = ['surveyor', 'itemName']; // 필수 항목
-    
-    checkboxes.forEach(checkbox => {
-        if (checkbox.checked && !checkbox.disabled) {
-            if (!selectedFields.includes(checkbox.value)) {
-                selectedFields.push(checkbox.value);
-            }
+    selectedFields = ['surveyor', 'itemName'];
+    checkboxes.forEach((checkbox) => {
+        if (checkbox.checked && !selectedFields.includes(checkbox.value)) {
+            selectedFields.push(checkbox.value);
         }
     });
 }
 
-// 필드 표시/숨김 적용
+function updateMoreFieldsVisibility() {
+    const details = document.getElementById('moreFieldsDetails');
+    if (!details) return;
+    const optionalSelected = FIELD_MODE_OPTIONAL.some((f) => selectedFields.includes(f));
+    if (!continuousMode) {
+        details.hidden = false;
+        details.open = true;
+        return;
+    }
+    details.hidden = !optionalSelected;
+    if (!optionalSelected) details.open = false;
+}
+
 function applyFieldVisibility() {
-    const allFields = document.querySelectorAll('[data-field]');
-    
-    allFields.forEach(field => {
+    const allFields = document.querySelectorAll('#itemForm [data-field]');
+    allFields.forEach((field) => {
         const fieldName = field.getAttribute('data-field');
-        if (selectedFields.includes(fieldName)) {
+        if (!continuousMode || selectedFields.includes(fieldName)) {
             field.classList.remove('hidden');
         } else {
             field.classList.add('hidden');
         }
     });
+    const scanWrap = document.querySelector('.scan-primary-wrap');
+    if (scanWrap) {
+        const showScan = !continuousMode || selectedFields.includes('assetNumber');
+        scanWrap.classList.toggle('hidden', !showScan);
+    }
+    updateMoreFieldsVisibility();
 }
 
-// 모든 필드 표시
 function showAllFields() {
-    const allFields = document.querySelectorAll('[data-field]');
-    allFields.forEach(field => {
+    document.querySelectorAll('#itemForm [data-field], .scan-primary-wrap').forEach((field) => {
         field.classList.remove('hidden');
     });
+    updateMoreFieldsVisibility();
 }
 
-// 연속 등록 시 공통 항목 유지하고 초기화
+function focusAfterFieldSave() {
+    const asset = document.getElementById('assetNumber');
+    const itemName = document.getElementById('itemName');
+    if (selectedFields.includes('assetNumber') && asset) {
+        asset.focus({ preventScroll: false });
+        asset.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+    }
+    itemName?.focus();
+}
+
 function resetFormKeepCommon() {
     const formData = new FormData(itemForm);
     const commonValues = {};
-    
-    // 공통 항목 값 저장
-    selectedFields.forEach(field => {
+
+    selectedFields.forEach((field) => {
         const value = formData.get(field);
-        if (value && field !== 'itemName') { // 물품명은 제외
+        if (value && field !== 'itemName' && field !== 'assetNumber') {
             commonValues[field] = value;
         }
     });
-    ['building', 'floor', 'room', 'organization', 'surveyor', 'quantity'].forEach(field => {
+    ['building', 'floor', 'room', 'organization', 'surveyor', 'quantity', 'category', 'condition'].forEach((field) => {
         const value = document.getElementById(field)?.value;
         if (value) commonValues[field] = value;
     });
-    
-    // 폼 초기화
+
     itemForm.reset();
-    
-    // 공통 항목 값 복원
-    Object.keys(commonValues).forEach(field => {
+
+    Object.keys(commonValues).forEach((field) => {
         const input = document.getElementById(field);
-        if (input) {
-            input.value = commonValues[field];
-        }
+        if (input) input.value = commonValues[field];
     });
     if (commonValues.organization && typeof selectOrganization === 'function') {
         const orgSelect = document.getElementById('organizationSelect');
@@ -1347,9 +1585,8 @@ function resetFormKeepCommon() {
         currentOrganization = commonValues.organization;
     }
     if (typeof updateLocationPreview === 'function') updateLocationPreview();
-    
-    // 갯수가 복원되지 않았으면 기본값 1 설정
-    if (!commonValues['quantity']) {
+
+    if (!commonValues.quantity) {
         document.getElementById('quantity').value = '1';
     }
     ['goodsClNo', 'goodsClNm', 'usefulLife'].forEach((id) => {
@@ -1357,9 +1594,13 @@ function resetFormKeepCommon() {
         if (el) el.value = '';
     });
     if (typeof refreshUsefulLifeUi === 'function') refreshUsefulLifeUi({ force: true });
-    
-    // 물품명 포커스
-    document.getElementById('itemName').focus();
+
+    syncChoiceChips();
+    updateFieldContextChips();
+    refreshRecentLocations();
+    contextEditing = false;
+    document.body.classList.remove('context-editing');
+    focusAfterFieldSave();
 }
 
 function resetFormAfterAdd() {
@@ -1377,7 +1618,10 @@ function resetFormAfterAdd() {
     }
     if (typeof updateLocationPreview === 'function') updateLocationPreview();
     if (typeof refreshUsefulLifeUi === 'function') refreshUsefulLifeUi({ force: true });
+    syncChoiceChips();
+    updateFieldContextChips();
 }
+
 
 // 물품 추가
 async function handleAddItem(e) {
@@ -2748,3 +2992,5 @@ window.toggleUserRole = toggleUserRole;
 window.migrateUserIds = migrateUserIds;
 window.loadNextPage = loadNextPage;
 window.goToFirstPage = goToFirstPage;
+window.updateFieldContextChips = updateFieldContextChips;
+window.refreshRecentLocations = refreshRecentLocations;

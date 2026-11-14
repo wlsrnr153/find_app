@@ -714,6 +714,7 @@ function selectOrganization(orgName) {
         if (selectedName) selectedName.textContent = orgName;
         if (selectedInfo) selectedInfo.style.display = 'flex';
         updateLocationDatalists();
+        if (typeof updateFieldContextChips === 'function') updateFieldContextChips();
         showToast(`"${orgName}" 기관이 선택되었습니다`, 'success');
     } else {
         clearOrganization();
@@ -729,6 +730,7 @@ function clearOrganization() {
     if (orgInput) orgInput.value = '';
     if (selectedInfo) selectedInfo.style.display = 'none';
     updateLocationDatalists();
+    if (typeof updateFieldContextChips === 'function') updateFieldContextChips();
 }
 
 function openAddOrganizationModal() {
@@ -881,6 +883,7 @@ function updateLocationPreview() {
         document.getElementById('room')?.value
     );
     preview.textContent = label ? `선택된 위치: ${label}` : '선택된 위치: 미입력';
+    if (typeof updateFieldContextChips === 'function') updateFieldContextChips();
 }
 
 async function upsertLocationFromItem(data) {

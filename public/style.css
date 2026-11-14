@@ -1830,8 +1830,9 @@ body.dark-mode .survey-input-banner.is-closed {
 
 .form-group[data-field].hidden,
 .form-row[data-field].hidden,
-.form-section[data-field].hidden {
-    display: none;
+.form-section[data-field].hidden,
+.scan-primary-wrap.hidden {
+    display: none !important;
 }
 
 /* í­ ì í ì ëë©ì´ì */
@@ -2100,9 +2101,9 @@ body.dark-mode .survey-input-banner.is-closed {
     .form-group input,
     .form-group select,
     .form-group textarea {
-        padding: 10px;
-        font-size: 14px;
-        border-radius: 6px;
+        padding: 12px;
+        font-size: 16px; /* iOS 자동 확대 방지 */
+        border-radius: 8px;
     }
     
     .form-row {
@@ -2816,4 +2817,284 @@ body.dark-mode .survey-input-banner.is-closed {
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 10px;
     margin-top: 10px;
+}
+
+
+/* ===== 현장 입력(모바일) UX ===== */
+.field-mode-bar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+}
+
+.field-context-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 10px;
+    background: var(--bg-primary);
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+}
+
+.field-chip {
+    border: 1px solid var(--gray-200);
+    background: var(--gray-50);
+    color: var(--text-primary);
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    min-height: 40px;
+    max-width: 100%;
+    cursor: pointer;
+}
+
+.field-chip-action {
+    margin-left: auto;
+    min-width: 44px;
+}
+
+.scan-primary-wrap {
+    margin-bottom: 16px;
+}
+
+.btn-scan-primary {
+    width: 100%;
+    min-height: 56px;
+    border: none;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #0f766e 0%, #115e59 100%);
+    color: #fff;
+    font-size: 18px;
+    font-weight: 700;
+    box-shadow: var(--shadow-md);
+    cursor: pointer;
+}
+
+.btn-scan-primary:active {
+    transform: scale(0.98);
+}
+
+.scan-primary-hint {
+    margin: 8px 0 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.recent-locations {
+    margin-bottom: 14px;
+}
+
+.recent-locations-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.recent-locations-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.recent-location-chip {
+    border: 1px solid var(--gray-200);
+    background: var(--bg-primary);
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 13px;
+    min-height: 40px;
+    cursor: pointer;
+}
+
+.qty-stepper {
+    display: grid;
+    grid-template-columns: 52px 1fr 52px;
+    gap: 8px;
+    align-items: center;
+}
+
+.qty-btn {
+    min-height: 48px;
+    border: 2px solid var(--gray-200);
+    border-radius: 10px;
+    background: var(--gray-50);
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.qty-stepper input {
+    text-align: center;
+    font-weight: 700;
+}
+
+.choice-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.choice-chip {
+    border: 1px solid var(--gray-200);
+    background: var(--bg-primary);
+    border-radius: 999px;
+    padding: 10px 14px;
+    min-height: 42px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text-primary);
+}
+
+.choice-chip.is-active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+}
+
+.more-fields {
+    margin: 8px 0 20px;
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    background: var(--bg-primary);
+    overflow: hidden;
+}
+
+.more-fields > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 14px 16px;
+    font-weight: 700;
+    font-size: 15px;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+}
+
+.more-fields > summary::-webkit-details-marker {
+    display: none;
+}
+
+.more-fields > summary::after {
+    content: "▼";
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.more-fields[open] > summary::after {
+    content: "▲";
+}
+
+.more-fields-body {
+    padding: 0 16px 16px;
+}
+
+.form-actions-sticky {
+    position: sticky;
+    bottom: 0;
+    z-index: 30;
+    margin: 0 -20px -20px;
+    padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px));
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid var(--gray-200);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.06);
+}
+
+body.dark-mode .form-actions-sticky {
+    background: rgba(17, 24, 39, 0.96);
+    border-top-color: var(--gray-200);
+}
+
+body:not(.field-mode) .field-context-bar,
+body:not(.field-mode) .recent-locations {
+    display: none !important;
+}
+
+body.field-mode:not(.context-editing) .organization-selector,
+body.field-mode:not(.context-editing) [data-context-field] {
+    display: none !important;
+}
+
+body.field-mode.context-editing .organization-selector,
+body.field-mode.context-editing [data-context-field] {
+    display: block;
+}
+
+body.field-mode .form-group-priority {
+    margin-bottom: 18px;
+}
+
+body.field-mode .form-group-priority input {
+    min-height: 48px;
+    font-size: 17px;
+}
+
+body.tab-input-active .header {
+    padding-top: 12px;
+    padding-bottom: 10px;
+}
+
+@media (max-width: 767px) {
+    .input-form {
+        padding-bottom: 8px;
+    }
+
+    .form-actions-sticky {
+        margin: 0 -16px -16px;
+        padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+        flex-direction: row;
+    }
+
+    .form-actions-sticky .btn {
+        min-height: 48px;
+        font-size: 16px;
+    }
+
+    .btn-scan-inline {
+        min-height: 48px;
+        min-width: 88px;
+    }
+
+    .asset-input-row {
+        flex-direction: row;
+        align-items: stretch;
+    }
+
+    .form-row.form-row-3 {
+        grid-template-columns: 1fr;
+    }
+
+    body.tab-input-active .header-info,
+    body.tab-input-active .survey-bar {
+        display: none;
+    }
+
+    body.field-mode .choice-select-fallback {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+    }
+}
+
+@media (min-width: 768px) {
+    .btn-scan-primary {
+        max-width: 420px;
+    }
+
+    .choice-select-fallback {
+        margin-top: 4px;
+    }
 }

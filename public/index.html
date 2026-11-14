@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <!-- iOS Safari 호환성 -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -160,8 +160,32 @@
 
         <!-- 입력 탭 -->
         <div class="tab-content" id="input">
+            <!-- 현장 입력 모드 -->
+            <div class="continuous-mode-control field-mode-bar">
+                <div class="mode-toggle">
+                    <input type="checkbox" id="continuousModeToggle" class="toggle-checkbox">
+                    <label for="continuousModeToggle" class="toggle-label">
+                        <span class="toggle-text">📱 현장 입력 모드</span>
+                    </label>
+                </div>
+                <button type="button" id="configureFieldsBtn" class="btn btn-secondary btn-small" style="display: none;">
+                    ⚙️ 항목
+                </button>
+            </div>
+
+            <div id="fieldContextBar" class="field-context-bar" hidden>
+                <button type="button" class="field-chip" data-chip="surveyor" id="chipSurveyor">조사자 · -</button>
+                <button type="button" class="field-chip" data-chip="organization" id="chipOrganization">기관 · -</button>
+                <button type="button" class="field-chip" data-chip="location" id="chipLocation">위치 · -</button>
+                <button type="button" class="field-chip field-chip-action" id="unlockContextBtn" title="공통값 수정">✏️</button>
+            </div>
+
+            <div id="surveyInputBanner" class="survey-input-banner">
+                현재 회차에 물품이 등록됩니다.
+            </div>
+
             <!-- 기관명 선택/생성 섹션 -->
-            <div class="organization-selector">
+            <div class="organization-selector" id="organizationSelectorBlock">
                 <div class="organization-header">
                     <h3>🏢 기관 선택</h3>
                     <button type="button" id="manageOrganizationsBtn" class="btn-icon" title="기관 관리">⚙️</button>
@@ -216,33 +240,16 @@
                 </div>
             </div>
 
-            <div id="surveyInputBanner" class="survey-input-banner">
-                현재 회차에 물품이 등록됩니다.
-            </div>
-
-            <!-- 연속 등록 모드 컨트롤 -->
-            <div class="continuous-mode-control">
-                <div class="mode-toggle">
-                    <input type="checkbox" id="continuousModeToggle" class="toggle-checkbox">
-                    <label for="continuousModeToggle" class="toggle-label">
-                        <span class="toggle-text">🔄 연속 등록 모드</span>
-                    </label>
-                </div>
-                <button type="button" id="configureFieldsBtn" class="btn btn-secondary btn-small" style="display: none;">
-                    ⚙️ 항목 선택
-                </button>
-            </div>
-
             <!-- 항목 선택 모달 -->
             <div id="fieldConfigModal" class="modal">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h2>연속 등록 항목 선택</h2>
+                        <h2>현장 입력 항목 선택</h2>
                         <button class="close-btn" id="closeFieldConfig">&times;</button>
                     </div>
                     <div class="field-config-body">
                         <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 16px;">
-                            연속 등록 시 사용할 항목을 선택하세요. 체크된 항목만 입력 폼에 표시됩니다.
+                            체크된 항목만 입력 폼에 표시됩니다. 조사자·물품명은 필수입니다.
                         </p>
                         <div class="field-checkboxes">
                             <label class="field-checkbox-item">
@@ -262,20 +269,20 @@
                                 <span>물품명 *</span>
                             </label>
                             <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="acquiredAt" checked>
-                                <span>취득일자</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="usefulLife" checked>
-                                <span>내용연수 분류</span>
-                            </label>
-                            <label class="field-checkbox-item">
                                 <input type="checkbox" class="field-checkbox" value="assetNumber" checked>
                                 <span>자산번호</span>
                             </label>
                             <label class="field-checkbox-item">
                                 <input type="checkbox" class="field-checkbox" value="quantity" checked>
                                 <span>갯수</span>
+                            </label>
+                            <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="acquiredAt">
+                                <span>취득일자</span>
+                            </label>
+                            <label class="field-checkbox-item">
+                                <input type="checkbox" class="field-checkbox" value="usefulLife">
+                                <span>내용연수 분류</span>
                             </label>
                             <label class="field-checkbox-item">
                                 <input type="checkbox" class="field-checkbox" value="category">
@@ -318,144 +325,178 @@
                 </div>
             </div>
 
-            <form id="itemForm" class="form">
-                <div class="form-group" data-field="surveyor">
+            <form id="itemForm" class="form input-form">
+                <div class="scan-primary-wrap" data-field="assetNumber">
+                    <button type="button" id="scanPrimaryBtn" class="btn-scan-primary">📷 스캔해서 등록</button>
+                    <p class="scan-primary-hint">바코드·QR을 찍으면 자산번호가 채워집니다</p>
+                </div>
+
+                <div id="recentLocations" class="recent-locations" hidden>
+                    <span class="recent-locations-label">최근 위치</span>
+                    <div id="recentLocationsList" class="recent-locations-list"></div>
+                </div>
+
+                <div class="form-group" data-field="surveyor" data-context-field="surveyor">
                     <label for="surveyor">조사자 이름 *</label>
-                    <input type="text" id="surveyor" name="surveyor" required placeholder="이름을 입력하세요">
+                    <input type="text" id="surveyor" name="surveyor" required placeholder="이름을 입력하세요" enterkeyhint="next" autocomplete="name">
                 </div>
 
-                <div class="form-group" data-field="organization">
+                <div class="form-group" data-field="organization" data-context-field="organization">
                     <label for="organization">기관명</label>
-                    <input type="text" id="organization" name="organization" placeholder="예: 현대건설">
+                    <input type="text" id="organization" name="organization" placeholder="예: 현대건설" enterkeyhint="next">
                 </div>
 
-                <div class="form-section" data-field="location">
+                <div class="form-section" data-field="location" data-context-field="location">
                     <div class="form-section-title">📍 사용위치</div>
                     <div class="form-row form-row-3">
                         <div class="form-group">
                             <label for="building">건물</label>
-                            <input list="buildingList" type="text" id="building" name="building" placeholder="예: 본사">
+                            <input list="buildingList" type="text" id="building" name="building" placeholder="예: 본사" enterkeyhint="next">
                             <datalist id="buildingList"></datalist>
                         </div>
                         <div class="form-group">
                             <label for="floor">층</label>
-                            <input list="floorList" type="text" id="floor" name="floor" placeholder="예: 3층">
+                            <input list="floorList" type="text" id="floor" name="floor" placeholder="예: 3층" enterkeyhint="next">
                             <datalist id="floorList"></datalist>
                         </div>
                         <div class="form-group">
                             <label for="room">실/호</label>
-                            <input list="roomList" type="text" id="room" name="room" placeholder="예: 회의실">
+                            <input list="roomList" type="text" id="room" name="room" placeholder="예: 회의실" enterkeyhint="next">
                             <datalist id="roomList"></datalist>
                         </div>
                     </div>
                     <p class="location-preview" id="locationPreview">선택된 위치: 미입력</p>
                 </div>
 
-                <div class="form-group" data-field="itemName">
+                <div class="form-group form-group-priority" data-field="itemName">
                     <label for="itemName">물품명 *</label>
-                    <input type="text" id="itemName" name="itemName" required placeholder="예: 사무용 책상">
+                    <input type="text" id="itemName" name="itemName" required placeholder="예: 사무용 책상" enterkeyhint="next" autocomplete="off">
                 </div>
 
-                <div class="form-group" data-field="acquiredAt">
-                    <label for="acquiredAt">취득일자</label>
-                    <input type="date" id="acquiredAt" name="acquiredAt">
-                </div>
-
-                <div class="form-group useful-life-block" data-field="usefulLife">
-                    <label>내용연수 분류</label>
-                    <input type="hidden" id="goodsClNo" name="goodsClNo">
-                    <input type="hidden" id="goodsClNm" name="goodsClNm">
-                    <input type="hidden" id="usefulLife" name="usefulLife">
-                    <div id="usefulLifePanel" class="ul-panel" hidden></div>
-                </div>
-
-                <div class="form-group" data-field="assetNumber">
+                <div class="form-group form-group-priority" data-field="assetNumber">
                     <label for="assetNumber">자산번호</label>
                     <div class="asset-input-row">
-                        <input type="text" id="assetNumber" name="assetNumber" 
-                               placeholder="예: ASSET-001 또는 바코드 스캔">
-                        <button type="button" id="scanAssetBtn" class="btn btn-secondary">📷 스캔</button>
+                        <input type="text" id="assetNumber" name="assetNumber"
+                               placeholder="스캔 또는 직접 입력" enterkeyhint="next" inputmode="text" autocomplete="off">
+                        <button type="button" id="scanAssetBtn" class="btn btn-secondary btn-scan-inline">📷 스캔</button>
                     </div>
                     <div id="assetCheckBanner" class="asset-check-banner" style="display: none;"></div>
                 </div>
 
-                <div class="form-group" data-field="quantity">
+                <div class="form-group form-group-priority" data-field="quantity">
                     <label for="quantity">갯수</label>
-                    <input type="number" id="quantity" name="quantity" min="1" value="1" placeholder="1">
-                </div>
-
-                <div class="form-group" data-field="category">
-                    <label for="category">카테고리</label>
-                    <select id="category" name="category">
-                        <option value="">선택하세요</option>
-                        <option value="가구">가구</option>
-                        <option value="전자제품">전자제품</option>
-                        <option value="사무용품">사무용품</option>
-                        <option value="기타">기타</option>
-                    </select>
-                </div>
-
-                <div class="form-group" data-field="manufacturer">
-                    <label for="manufacturer">제조사</label>
-                    <input type="text" id="manufacturer" name="manufacturer" placeholder="예: 삼성">
-                </div>
-
-                <div class="form-group" data-field="model">
-                    <label for="model">모델명</label>
-                    <input type="text" id="model" name="model" placeholder="예: ABC-123">
-                </div>
-
-                <div class="form-section" data-field="dimensions">
-                    <div class="form-section-title">📏 치수 정보</div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="width">가로 (cm)</label>
-                            <input type="number" id="width" name="width" step="0.1" placeholder="0">
-                        </div>
-                        <div class="form-group">
-                            <label for="height">세로 (cm)</label>
-                            <input type="number" id="height" name="height" step="0.1" placeholder="0">
-                        </div>
-                        <div class="form-group">
-                            <label for="depth">깊이 (cm)</label>
-                            <input type="number" id="depth" name="depth" step="0.1" placeholder="0">
-                        </div>
+                    <div class="qty-stepper">
+                        <button type="button" class="qty-btn" id="qtyMinus" aria-label="감소">−</button>
+                        <input type="number" id="quantity" name="quantity" min="1" value="1" placeholder="1" inputmode="numeric" enterkeyhint="done">
+                        <button type="button" class="qty-btn" id="qtyPlus" aria-label="증가">+</button>
                     </div>
                 </div>
 
-                <div class="form-row" data-field="color">
-                    <div class="form-group">
-                        <label for="color">색상</label>
-                        <input type="text" id="color" name="color" placeholder="예: 흰색">
+                <details class="more-fields" id="moreFieldsDetails">
+                    <summary>추가 정보</summary>
+                    <div class="more-fields-body">
+                        <div class="form-group" data-field="acquiredAt">
+                            <label for="acquiredAt">취득일자</label>
+                            <input type="date" id="acquiredAt" name="acquiredAt">
+                        </div>
+
+                        <div class="form-group useful-life-block" data-field="usefulLife">
+                            <label>내용연수 분류</label>
+                            <input type="hidden" id="goodsClNo" name="goodsClNo">
+                            <input type="hidden" id="goodsClNm" name="goodsClNm">
+                            <input type="hidden" id="usefulLife" name="usefulLife">
+                            <div id="usefulLifeBox" class="ul-panel" hidden></div>
+                        </div>
+
+                        <div class="form-group" data-field="category">
+                            <label for="category">카테고리</label>
+                            <div class="choice-chips" data-choice-for="category" role="group" aria-label="카테고리">
+                                <button type="button" class="choice-chip" data-value="">없음</button>
+                                <button type="button" class="choice-chip" data-value="가구">가구</button>
+                                <button type="button" class="choice-chip" data-value="전자제품">전자제품</button>
+                                <button type="button" class="choice-chip" data-value="사무용품">사무용품</button>
+                                <button type="button" class="choice-chip" data-value="기타">기타</button>
+                            </div>
+                            <select id="category" name="category" class="choice-select-fallback">
+                                <option value="">선택하세요</option>
+                                <option value="가구">가구</option>
+                                <option value="전자제품">전자제품</option>
+                                <option value="사무용품">사무용품</option>
+                                <option value="기타">기타</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" data-field="manufacturer">
+                            <label for="manufacturer">제조사</label>
+                            <input type="text" id="manufacturer" name="manufacturer" placeholder="예: 삼성" enterkeyhint="next">
+                        </div>
+
+                        <div class="form-group" data-field="model">
+                            <label for="model">모델명</label>
+                            <input type="text" id="model" name="model" placeholder="예: ABC-123" enterkeyhint="next">
+                        </div>
+
+                        <div class="form-section" data-field="dimensions">
+                            <div class="form-section-title">📏 치수 정보</div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="width">가로 (cm)</label>
+                                    <input type="number" id="width" name="width" step="0.1" placeholder="0" inputmode="decimal">
+                                </div>
+                                <div class="form-group">
+                                    <label for="height">세로 (cm)</label>
+                                    <input type="number" id="height" name="height" step="0.1" placeholder="0" inputmode="decimal">
+                                </div>
+                                <div class="form-group">
+                                    <label for="depth">깊이 (cm)</label>
+                                    <input type="number" id="depth" name="depth" step="0.1" placeholder="0" inputmode="decimal">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-row" data-field="color">
+                            <div class="form-group">
+                                <label for="color">색상</label>
+                                <input type="text" id="color" name="color" placeholder="예: 흰색">
+                            </div>
+                        </div>
+
+                        <div class="form-row" data-field="material">
+                            <div class="form-group">
+                                <label for="material">재질</label>
+                                <input type="text" id="material" name="material" placeholder="예: 목재">
+                            </div>
+                        </div>
+
+                        <div class="form-group" data-field="condition">
+                            <label for="condition">상태</label>
+                            <div class="choice-chips" data-choice-for="condition" role="group" aria-label="상태">
+                                <button type="button" class="choice-chip" data-value="">없음</button>
+                                <button type="button" class="choice-chip" data-value="매우 좋음">매우 좋음</button>
+                                <button type="button" class="choice-chip" data-value="좋음">좋음</button>
+                                <button type="button" class="choice-chip" data-value="보통">보통</button>
+                                <button type="button" class="choice-chip" data-value="나쁨">나쁨</button>
+                                <button type="button" class="choice-chip" data-value="매우 나쁨">매우 나쁨</button>
+                            </div>
+                            <select id="condition" name="condition" class="choice-select-fallback">
+                                <option value="">선택하세요</option>
+                                <option value="매우 좋음">매우 좋음</option>
+                                <option value="좋음">좋음</option>
+                                <option value="보통">보통</option>
+                                <option value="나쁨">나쁨</option>
+                                <option value="매우 나쁨">매우 나쁨</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" data-field="notes">
+                            <label for="notes">비고</label>
+                            <textarea id="notes" name="notes" rows="3" placeholder="추가 정보를 입력하세요" enterkeyhint="done"></textarea>
+                        </div>
                     </div>
-                </div>
+                </details>
 
-                <div class="form-row" data-field="material">
-                    <div class="form-group">
-                        <label for="material">재질</label>
-                        <input type="text" id="material" name="material" placeholder="예: 목재">
-                    </div>
-                </div>
-
-                <div class="form-group" data-field="condition">
-                    <label for="condition">상태</label>
-                    <select id="condition" name="condition">
-                        <option value="">선택하세요</option>
-                        <option value="매우 좋음">매우 좋음</option>
-                        <option value="좋음">좋음</option>
-                        <option value="보통">보통</option>
-                        <option value="나쁨">나쁨</option>
-                        <option value="매우 나쁨">매우 나쁨</option>
-                    </select>
-                </div>
-
-                <div class="form-group" data-field="notes">
-                    <label for="notes">비고</label>
-                    <textarea id="notes" name="notes" rows="3" placeholder="추가 정보를 입력하세요"></textarea>
-                </div>
-
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">✅ 저장</button>
+                <div class="form-actions form-actions-sticky">
+                    <button type="submit" class="btn btn-primary" id="submitItemBtn">✅ 저장</button>
                     <button type="button" class="btn btn-secondary" id="resetBtn">🔄 초기화</button>
                 </div>
             </form>
