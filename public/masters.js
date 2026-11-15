@@ -91,6 +91,7 @@ function refreshVisibleViews() {
     updateLocationDatalists();
     updateLocationPreview();
     if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
+    if (typeof applyFormSchemaForCurrentSurvey === 'function') applyFormSchemaForCurrentSurvey();
 }
 
 async function initMasters() {
@@ -140,10 +141,11 @@ function bindMasterEvents() {
         });
     }
 
-    ['building', 'floor', 'room'].forEach(id => {
-        const input = document.getElementById(id);
-        if (input) input.addEventListener('input', updateLocationPreview);
-    });
+    const locationInput = document.getElementById('location');
+    if (locationInput) {
+        locationInput.addEventListener('input', updateLocationPreview);
+        locationInput.addEventListener('change', updateLocationPreview);
+    }
 }
 
 function newMasterId(prefix) {
@@ -363,6 +365,7 @@ function listenSurveys() {
         }
         refreshVisibleViews();
         updateSurveyList();
+        if (typeof applyFormSchemaForCurrentSurvey === 'function') applyFormSchemaForCurrentSurvey();
         if (typeof ensureAdminDefaultSurvey === 'function') ensureAdminDefaultSurvey();
     }, (error) => {
         console.warn('조사 회차 컬렉션 권한 없음, users 문서로 대체:', error);
@@ -479,6 +482,7 @@ function selectSurvey(surveyId) {
     localStorage.setItem(SURVEY_STORAGE_KEY, currentSurveyId);
     if (typeof updateBaselineStatusUi === 'function') updateBaselineStatusUi();
     if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
+    if (typeof applyFormSchemaForCurrentSurvey === 'function') applyFormSchemaForCurrentSurvey();
     if (typeof currentUserRole !== 'undefined' && currentUserRole === 'admin'
         && typeof reloadAdminScopedItems === 'function') {
         reloadAdminScopedItems({ toast: true });
@@ -903,52 +907,43 @@ async function deleteOrganization(orgName) {
     }
 }
 
+function locationRecordLabel(location) {
+    if (!location) return '';
+    return String(location.label || '').trim()
+        || composeLocation(location.building, location.floor, location.room, '');
+}
+
 function updateLocationDatalists() {
     const orgName = document.getElementById('organization')?.value || currentOrganization;
     const matched = locations.filter(location => !orgName || location.organization === orgName);
-    const fill = (id, values) => {
-        const list = document.getElementById(id);
-        if (!list) return;
-        const unique = Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ko'));
-        list.innerHTML = unique.map(value => `<option value="${escapeHtml(value)}"></option>`).join('');
-    };
-    fill('buildingList', matched.map(location => location.building));
-    fill('floorList', matched.map(location => location.floor));
-    fill('roomList', matched.map(location => location.room));
+    const list = document.getElementById('locationList');
+    if (!list) return;
+    const unique = Array.from(new Set(
+        matched.map(locationRecordLabel).filter(Boolean)
+    )).sort((a, b) => a.localeCompare(b, 'ko'));
+    list.innerHTML = unique.map(value => `<option value="${escapeHtml(value)}"></option>`).join('');
 }
 
 function updateLocationPreview() {
-    const preview = document.getElementById('locationPreview');
-    if (!preview) return;
-    const label = composeLocation(
-        document.getElementById('building')?.value,
-        document.getElementById('floor')?.value,
-        document.getElementById('room')?.value
-    );
-    preview.textContent = label ? `선택된 위치: ${label}` : '선택된 위치: 미입력';
     if (typeof updateFieldContextChips === 'function') updateFieldContextChips();
 }
 
 async function upsertLocationFromItem(data) {
     const organization = (data.organization || '').trim();
-    const building = (data.building || '').trim();
-    const floor = (data.floor || '').trim();
-    const room = (data.room || '').trim();
-    const label = composeLocation(building, floor, room, data.location);
+    const label = String(data.location || '').trim()
+        || composeLocation(data.building, data.floor, data.room, '');
     if (!organization || !label) return label;
     const exists = locations.some(location =>
         location.organization === organization &&
-        location.building === building &&
-        location.floor === floor &&
-        location.room === room
+        locationRecordLabel(location) === label
     );
     if (!exists) {
         try {
             await db.collection('locations').add({
                 organization,
-                building,
-                floor,
-                room,
+                building: '',
+                floor: '',
+                room: '',
                 label,
                 createdBy: currentUser.uid,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -960,9 +955,9 @@ async function upsertLocationFromItem(data) {
                     await addToUserMaster('locations', {
                         id: newMasterId('loc'),
                         organization,
-                        building,
-                        floor,
-                        room,
+                        building: '',
+                        floor: '',
+                        room: '',
                         label,
                         createdBy: currentUser.uid,
                         createdAt: new Date().toISOString()
@@ -979,8 +974,13 @@ async function upsertLocationFromItem(data) {
 }
 
 function applyItemLocationFields(data) {
-    const location = composeLocation(data.building, data.floor, data.room, data.location);
+    const location = String(data.location || '').trim()
+        || composeLocation(data.building, data.floor, data.room, '');
     if (location) data.location = location;
+    // 단일 사용위치 입력으로 통일 — 분리 필드는 비움
+    data.building = '';
+    data.floor = '';
+    data.room = '';
     return data;
 }
 

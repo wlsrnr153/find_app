@@ -173,16 +173,10 @@
                 </button>
             </div>
 
-            <div id="fieldContextBar" class="field-context-bar" hidden>
-                <button type="button" class="field-chip" data-chip="surveyor" id="chipSurveyor">조사자 · -</button>
-                <button type="button" class="field-chip" data-chip="organization" id="chipOrganization">기관 · -</button>
-                <button type="button" class="field-chip" data-chip="location" id="chipLocation">위치 · -</button>
-                <button type="button" class="field-chip field-chip-action" id="unlockContextBtn" title="공통값 수정">✏️</button>
-            </div>
-
             <div id="surveyInputBanner" class="survey-input-banner">
                 현재 회차에 물품이 등록됩니다.
             </div>
+            <div id="formSchemaBanner" class="form-schema-banner" hidden></div>
 
             <!-- 기관명 선택/생성 섹션 -->
             <div class="organization-selector" id="organizationSelectorBlock">
@@ -251,71 +245,8 @@
                         <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 16px;">
                             체크된 항목만 입력 폼에 표시됩니다. 조사자·물품명은 필수입니다.
                         </p>
-                        <div class="field-checkboxes">
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="surveyor" checked disabled>
-                                <span>조사자 이름 *</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="organization" checked>
-                                <span>기관명</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="location" checked>
-                                <span>사용위치</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="itemName" checked>
-                                <span>물품명 *</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="assetNumber" checked>
-                                <span>자산번호</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="quantity" checked>
-                                <span>갯수</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="acquiredAt">
-                                <span>취득일자</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="usefulLife">
-                                <span>내용연수 분류</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="category">
-                                <span>카테고리</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="manufacturer">
-                                <span>제조사</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="model">
-                                <span>모델명</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="dimensions">
-                                <span>치수 정보</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="color">
-                                <span>색상</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="material">
-                                <span>재질</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="condition">
-                                <span>상태</span>
-                            </label>
-                            <label class="field-checkbox-item">
-                                <input type="checkbox" class="field-checkbox" value="notes">
-                                <span>비고</span>
-                            </label>
+                        <div class="field-checkboxes" id="fieldCheckboxList">
+                            <!-- 회차 스키마 기준으로 동적 생성 -->
                         </div>
                         <div class="form-actions">
                             <button type="button" class="btn btn-primary" id="applyFieldConfig">✅ 적용</button>
@@ -331,41 +262,16 @@
                     <p class="scan-primary-hint">바코드·QR을 찍으면 자산번호가 채워집니다</p>
                 </div>
 
-                <div id="recentLocations" class="recent-locations" hidden>
-                    <span class="recent-locations-label">최근 위치</span>
-                    <div id="recentLocationsList" class="recent-locations-list"></div>
-                </div>
-
-                <div class="form-group" data-field="surveyor" data-context-field="surveyor">
-                    <label for="surveyor">조사자 이름 *</label>
-                    <input type="text" id="surveyor" name="surveyor" required placeholder="이름을 입력하세요" enterkeyhint="next" autocomplete="name">
-                </div>
-
-                <div class="form-group" data-field="organization" data-context-field="organization">
-                    <label for="organization">기관명</label>
-                    <input type="text" id="organization" name="organization" placeholder="예: 현대건설" enterkeyhint="next">
-                </div>
-
-                <div class="form-section" data-field="location" data-context-field="location">
-                    <div class="form-section-title">📍 사용위치</div>
-                    <div class="form-row form-row-3">
-                        <div class="form-group">
-                            <label for="building">건물</label>
-                            <input list="buildingList" type="text" id="building" name="building" placeholder="예: 본사" enterkeyhint="next">
-                            <datalist id="buildingList"></datalist>
-                        </div>
-                        <div class="form-group">
-                            <label for="floor">층</label>
-                            <input list="floorList" type="text" id="floor" name="floor" placeholder="예: 3층" enterkeyhint="next">
-                            <datalist id="floorList"></datalist>
-                        </div>
-                        <div class="form-group">
-                            <label for="room">실/호</label>
-                            <input list="roomList" type="text" id="room" name="room" placeholder="예: 회의실" enterkeyhint="next">
-                            <datalist id="roomList"></datalist>
-                        </div>
+                <div class="form-group form-group-priority" data-field="assetNumber">
+                    <label for="assetNumber">자산번호</label>
+                    <div class="asset-input-row">
+                        <input type="text" id="assetNumber" name="assetNumber"
+                               placeholder="전체·끝자리·일부 입력" enterkeyhint="next" inputmode="text" autocomplete="off">
+                        <button type="button" id="scanAssetBtn" class="btn btn-secondary btn-scan-inline">📷 스캔</button>
                     </div>
-                    <p class="location-preview" id="locationPreview">선택된 위치: 미입력</p>
+                    <div id="assetMatchCandidates" class="asset-match-candidates" hidden></div>
+                    <div id="assetCheckBanner" class="asset-check-banner" style="display: none;"></div>
+                    <div id="baselineComparePanel" class="baseline-compare-panel" style="display: none;"></div>
                 </div>
 
                 <div class="form-group form-group-priority" data-field="itemName">
@@ -373,20 +279,21 @@
                     <input type="text" id="itemName" name="itemName" required placeholder="예: 사무용 책상" enterkeyhint="next" autocomplete="off">
                 </div>
 
-                <div class="form-group form-group-priority" data-field="assetNumber">
-                    <label for="assetNumber">자산번호</label>
-                    <div class="asset-input-row">
-                        <input type="text" id="assetNumber" name="assetNumber"
-                               placeholder="스캔 또는 직접 입력" enterkeyhint="next" inputmode="text" autocomplete="off">
-                        <button type="button" id="scanAssetBtn" class="btn btn-secondary btn-scan-inline">📷 스캔</button>
-                    </div>
-                    <div id="assetCheckBanner" class="asset-check-banner" style="display: none;"></div>
-                    <div id="baselineComparePanel" class="baseline-compare-panel" style="display: none;"></div>
-                </div>
-
                 <div class="form-group form-group-priority" data-field="holder">
                     <label for="holder">사용자</label>
                     <input type="text" id="holder" name="holder" placeholder="사용·관리 담당자" enterkeyhint="next" autocomplete="off">
+                </div>
+
+                <div id="recentLocations" class="recent-locations" hidden>
+                    <span class="recent-locations-label">최근 위치</span>
+                    <div id="recentLocationsList" class="recent-locations-list"></div>
+                </div>
+
+                <div class="form-group form-group-priority" data-field="location">
+                    <label for="location">📍 사용위치</label>
+                    <input list="locationList" type="text" id="location" name="location"
+                           placeholder="예: 본관 3층 301호" enterkeyhint="next" autocomplete="off">
+                    <datalist id="locationList"></datalist>
                 </div>
 
                 <div class="form-group form-group-priority" data-field="quantity">
@@ -396,6 +303,31 @@
                         <input type="number" id="quantity" name="quantity" min="1" value="1" placeholder="1" inputmode="numeric" enterkeyhint="done">
                         <button type="button" class="qty-btn" id="qtyPlus" aria-label="증가">+</button>
                     </div>
+                </div>
+
+                <div id="fieldContextBar" class="field-context-bar" hidden>
+                    <div class="field-context-head">
+                        <strong>현장 공통</strong>
+                        <button type="button" class="field-chip field-chip-action" id="unlockContextBtn" title="공통값 수정">✏️ 수정</button>
+                    </div>
+                    <button type="button" class="field-chip" data-chip="surveyor" id="chipSurveyor">
+                        <span class="field-chip-label">조사자</span>
+                        <span class="field-chip-value">-</span>
+                    </button>
+                    <button type="button" class="field-chip" data-chip="organization" id="chipOrganization">
+                        <span class="field-chip-label">기관</span>
+                        <span class="field-chip-value">-</span>
+                    </button>
+                </div>
+
+                <div class="form-group form-group-context" data-field="surveyor" data-context-field="surveyor">
+                    <label for="surveyor">조사자 이름 *</label>
+                    <input type="text" id="surveyor" name="surveyor" required placeholder="이름을 입력하세요" enterkeyhint="next" autocomplete="name">
+                </div>
+
+                <div class="form-group form-group-context" data-field="organization" data-context-field="organization">
+                    <label for="organization">기관명</label>
+                    <input type="text" id="organization" name="organization" placeholder="예: 현대건설" enterkeyhint="next">
                 </div>
 
                 <details class="more-fields" id="moreFieldsDetails">
@@ -498,6 +430,8 @@
                             <label for="notes">비고</label>
                             <textarea id="notes" name="notes" rows="3" placeholder="추가 정보를 입력하세요" enterkeyhint="done"></textarea>
                         </div>
+
+                        <div id="schemaExtraFields" class="schema-extra-fields" hidden></div>
                     </div>
                 </details>
 
@@ -511,7 +445,7 @@
         <!-- 목록 탭 -->
         <div class="tab-content" id="list">
             <div class="list-controls">
-                <input type="text" id="searchInput" placeholder="🔍 검색 (물품명, 자산번호, 기관, 위치, 조사자 등)">
+                <input type="text" id="searchInput" placeholder="🔍 검색 (자산번호 일부·끝자리, 물품명, 기관, 위치 등)">
                 <select id="filterOrganization">
                     <option value="">전체 기관</option>
                 </select>
@@ -584,7 +518,7 @@
                     <button type="button" class="btn btn-secondary btn-small" data-register-filter="new">신규</button>
                 </div>
                 <div class="register-controls">
-                    <input type="text" id="registerSearch" placeholder="🔍 자산번호, 물품명, 위치, 분류, 확인자 검색">
+                    <input type="text" id="registerSearch" placeholder="🔍 자산번호 일부·끝자리, 물품명, 위치 검색">
                     <select id="registerSort" title="정렬 기준">
                         <option value="default">대장 순서</option>
                         <option value="asset">자산번호순</option>
@@ -894,6 +828,7 @@
                 </label>
                 <p id="registerMapProfile" class="register-map-profile" style="display: none;"></p>
                 <div id="registerMapFields" class="register-map-fields"></div>
+                <div id="registerFormSchemaSection" class="register-form-schema-section"></div>
                 <h3 class="form-section-title">미리보기</h3>
                 <div id="registerMapPreview" class="register-map-preview"></div>
                 <div class="form-actions">
@@ -997,24 +932,9 @@
                     <input type="text" id="editOrganization" name="organization">
                 </div>
 
-                <div class="form-section-title">📍 사용위치</div>
-                <div class="form-row form-row-3">
-                    <div class="form-group">
-                        <label for="editBuilding">건물</label>
-                        <input type="text" id="editBuilding" name="building">
-                    </div>
-                    <div class="form-group">
-                        <label for="editFloor">층</label>
-                        <input type="text" id="editFloor" name="floor">
-                    </div>
-                    <div class="form-group">
-                        <label for="editRoom">실/호</label>
-                        <input type="text" id="editRoom" name="room">
-                    </div>
-                </div>
                 <div class="form-group">
-                    <label for="editLocation">위치 표시명</label>
-                    <input type="text" id="editLocation" name="location" placeholder="비우면 건물/층/실로 자동 생성">
+                    <label for="editLocation">📍 사용위치</label>
+                    <input type="text" id="editLocation" name="location" placeholder="예: 본관 3층 301호">
                 </div>
 
                 <div class="form-group">
@@ -1133,6 +1053,7 @@
     <script src="useful-life-excel.js"></script>
     <script src="useful-life-register.js"></script>
     <script src="register.js"></script>
+    <script src="form-schema.js"></script>
     <script src="baseline-register.js"></script>
     <script src="excel-form-convert.js"></script>
     

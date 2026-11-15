@@ -10,8 +10,120 @@ function setRegisterItems(list) {
     window.registerItems = registerItems;
 }
 
+const ASSET_PARTIAL_MIN_LEN = 3;
+const ASSET_CANDIDATE_LIMIT = 12;
+
 function normalizeAsset(value) {
     return String(value || '').trim().toLowerCase().replace(/[\s\-_.]/g, '');
+}
+
+function assetDigits(value) {
+    return String(value || '').replace(/\D/g, '');
+}
+
+function scoreAssetMatch(query, assetNumber) {
+    const q = normalizeAsset(query);
+    const a = normalizeAsset(assetNumber);
+    if (!q || !a) return null;
+    if (a === q) return { rank: 0, type: 'exact' };
+
+    const qd = assetDigits(q);
+    const ad = assetDigits(a);
+    if (qd.length >= ASSET_PARTIAL_MIN_LEN && ad.endsWith(qd)) {
+        return { rank: 1, type: 'suffix' };
+    }
+    if (q.length >= ASSET_PARTIAL_MIN_LEN && a.includes(q)) {
+        return { rank: 2, type: 'contains' };
+    }
+    if (qd.length >= ASSET_PARTIAL_MIN_LEN && ad.includes(qd)) {
+        return { rank: 3, type: 'digits' };
+    }
+    return null;
+}
+
+function collectAssetCandidates(query, options = {}) {
+    const limit = options.limit || ASSET_CANDIDATE_LIMIT;
+    const q = normalizeAsset(query);
+    if (!q || q.length < ASSET_PARTIAL_MIN_LEN) return [];
+
+    const results = [];
+    const seen = new Set();
+    const push = (record, source) => {
+        if (!record?.assetNumber) return;
+        const key = normalizeAsset(record.assetNumber);
+        if (!key || seen.has(key)) return;
+        const score = scoreAssetMatch(query, record.assetNumber);
+        if (!score) return;
+        seen.add(key);
+        results.push({
+            record,
+            source,
+            assetNumber: record.assetNumber,
+            itemName: record.itemName || '',
+            location: record.location
+                || [record.building, record.floor, record.room].filter(Boolean).join(' ')
+                || '',
+            ...score
+        });
+    };
+
+    getRegisterForSurvey(options.surveyId).forEach((record) => push(record, 'register'));
+    if (typeof getBaselineForSurvey === 'function') {
+        getBaselineForSurvey(options.surveyId).forEach((record) => push(record, 'baseline'));
+    }
+
+    results.sort((a, b) => (
+        a.rank - b.rank
+        || String(a.assetNumber).localeCompare(String(b.assetNumber), 'ko', { numeric: true })
+    ));
+    return results.slice(0, limit);
+}
+
+function clearAssetMatchCandidates() {
+    const box = document.getElementById('assetMatchCandidates');
+    if (!box) return;
+    box.hidden = true;
+    box.innerHTML = '';
+}
+
+function renderAssetMatchCandidates(candidates, query) {
+    const box = document.getElementById('assetMatchCandidates');
+    if (!box) return;
+    if (!candidates.length) {
+        clearAssetMatchCandidates();
+        return;
+    }
+    const sourceLabel = (source) => (source === 'baseline' ? '기준' : '금년');
+    box.hidden = false;
+    box.innerHTML = `
+        <div class="asset-match-head">${candidates.length}건 후보 · "${escapeHtml(query)}" 부분일치</div>
+        <div class="asset-match-list">
+            ${candidates.map((item, index) => `
+                <button type="button" class="asset-match-item" data-asset-pick="${index}">
+                    <strong>${escapeHtml(item.assetNumber)}</strong>
+                    <span>${escapeHtml(item.itemName || '이름 없음')}</span>
+                    <small>${escapeHtml(sourceLabel(item.source))}${item.location ? ` · ${escapeHtml(item.location)}` : ''}</small>
+                </button>
+            `).join('')}
+        </div>
+    `;
+    box.querySelectorAll('[data-asset-pick]').forEach((btn) => {
+        btn.addEventListener('mousedown', (e) => e.preventDefault());
+        btn.addEventListener('click', () => {
+            const picked = candidates[Number(btn.dataset.assetPick)];
+            if (!picked) return;
+            selectAssetCandidate(picked.assetNumber);
+        });
+    });
+}
+
+function selectAssetCandidate(assetNumber) {
+    const input = document.getElementById('assetNumber');
+    if (!input) return;
+    input.value = String(assetNumber || '').trim();
+    clearAssetMatchCandidates();
+    updateAssetCheckBanner({ allowAutofill: false });
+    showToast(`자산번호 ${input.value} 선택`, 'success');
 }
 
 function getRegisterSurveyId() {
@@ -513,56 +625,157 @@ async function markRegisterFound(assetNumber, itemId, extra = {}) {
     });
 }
 
-function applyRegisterToForm(record) {
+function clearItemEntryFields(options = {}) {
+    const keepAssetNumber = options.keepAssetNumber === true;
+    const keepContext = options.keepContext !== false;
+    const form = document.getElementById('itemForm');
+    if (!form) return;
+
+    const preserve = new Set();
+    if (keepAssetNumber) preserve.add('assetNumber');
+    if (keepContext) {
+        ['surveyor', 'organization'].forEach((key) => preserve.add(key));
+    }
+
+    form.querySelectorAll('input, select, textarea').forEach((el) => {
+        if (!el.name && !el.id) return;
+        const key = el.name || el.id;
+        if (preserve.has(key)) return;
+        if (el.type === 'hidden' && ['goodsClNo', 'goodsClNm', 'usefulLife'].includes(el.id || key)) {
+            el.value = '';
+            return;
+        }
+        if (el.type === 'checkbox' || el.type === 'radio') {
+            el.checked = false;
+            return;
+        }
+        if (el.tagName === 'SELECT') {
+            el.selectedIndex = 0;
+            return;
+        }
+        el.value = '';
+    });
+
+    const quantity = document.getElementById('quantity');
+    if (quantity && !preserve.has('quantity')) quantity.value = '1';
+
+    if (typeof refreshUsefulLifeUi === 'function') refreshUsefulLifeUi({ force: true });
+    if (typeof syncChoiceChips === 'function') syncChoiceChips();
+    if (typeof updateLocationPreview === 'function') updateLocationPreview();
+    if (typeof updateFieldContextChips === 'function') updateFieldContextChips();
+    if (typeof clearAssetMatchCandidates === 'function') clearAssetMatchCandidates();
+}
+
+function applyRegisterToForm(record, options = {}) {
+    if (options.clearFirst) {
+        clearItemEntryFields({
+            keepAssetNumber: options.keepAssetNumber !== false,
+            keepContext: options.keepContext === true
+        });
+    }
     const setValue = (id, value) => {
         const el = document.getElementById(id);
-        if (el && value) el.value = value;
+        if (!el) return;
+        if (options.clearFirst) {
+            el.value = value != null ? String(value) : '';
+            return;
+        }
+        if (value != null && String(value).trim() !== '') el.value = value;
     };
-    setValue('itemName', record.itemName);
-    setValue('organization', record.organization);
-    setValue('holder', record.holder);
-    setValue('location', record.location);
-    setValue('building', record.building);
-    setValue('floor', record.floor);
-    setValue('room', record.room);
-    setValue('category', record.category);
-    setValue('quantity', record.quantity || '1');
-    setValue('manufacturer', record.manufacturer);
-    setValue('model', record.model);
-    setValue('condition', record.condition);
-    setValue('acquiredAt', record.acquiredAt);
-    setValue('goodsClNo', record.goodsClNo);
-    setValue('goodsClNm', record.goodsClNm);
-    if (record.usefulLife) setValue('usefulLife', record.usefulLife);
-    if (record.organization && typeof selectOrganization === 'function') {
+    const source = typeof flattenMappedExtras === 'function'
+        ? flattenMappedExtras(record, typeof getSurveyFormSchema === 'function' ? getSurveyFormSchema() : null)
+        : record;
+    const composedLocation = source.location
+        || [source.building, source.floor, source.room].map((v) => String(v || '').trim()).filter(Boolean).join(' ')
+        || '';
+    setValue('itemName', source.itemName || '');
+    setValue('location', composedLocation);
+    if (!options.keepContext) {
+        setValue('organization', source.organization || '');
+    } else if (options.clearFirst && options.overwriteContext) {
+        setValue('organization', source.organization || '');
+    } else if (!options.clearFirst) {
+        setValue('organization', source.organization);
+    }
+    setValue('holder', source.holder || '');
+    setValue('category', source.category || '');
+    setValue('quantity', source.quantity || '1');
+    setValue('manufacturer', source.manufacturer || '');
+    setValue('model', source.model || '');
+    setValue('condition', source.condition || '');
+    setValue('acquiredAt', source.acquiredAt || '');
+    setValue('goodsClNo', source.goodsClNo || '');
+    setValue('goodsClNm', source.goodsClNm || '');
+    setValue('usefulLife', source.usefulLife != null && source.usefulLife !== '' ? source.usefulLife : '');
+    Object.keys(source).forEach((key) => {
+        if (!key.startsWith('custom_')) return;
+        setValue(key, source[key] || '');
+    });
+    if (source.extra && typeof source.extra === 'object') {
+        Object.keys(source.extra).forEach((header) => {
+            const key = typeof customFieldKeyFromHeader === 'function'
+                ? customFieldKeyFromHeader(header)
+                : '';
+            if (key) setValue(key, source.extra[header] || '');
+        });
+    }
+    if (source.organization && typeof selectOrganization === 'function' && (!options.keepContext || options.overwriteContext)) {
         const orgSelect = document.getElementById('organizationSelect');
-        if (orgSelect) orgSelect.value = record.organization;
-        currentOrganization = record.organization;
+        if (orgSelect) orgSelect.value = source.organization;
+        currentOrganization = source.organization;
     }
     if (typeof updateLocationPreview === 'function') updateLocationPreview();
     if (typeof refreshUsefulLifeUi === 'function') refreshUsefulLifeUi({ force: true });
     if (typeof syncChoiceChips === 'function') syncChoiceChips();
+    if (typeof updateFieldContextChips === 'function') updateFieldContextChips();
 }
 
-function updateAssetCheckBanner() {
+function updateAssetCheckBanner(options = {}) {
     const banner = document.getElementById('assetCheckBanner');
     const input = document.getElementById('assetNumber');
     if (!banner || !input) return;
 
     const assetNumber = input.value.trim();
+    const allowAutofill = options.allowAutofill !== false;
     pendingAssetOverride = false;
     banner.className = 'asset-check-banner';
     banner.style.display = 'none';
     banner.textContent = '';
+    clearAssetMatchCandidates();
     if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
 
     if (!assetNumber) return;
 
-    const baseline = typeof findBaselineByAsset === 'function' ? findBaselineByAsset(assetNumber) : null;
-    const register = findRegisterByAsset(assetNumber);
+    let baseline = typeof findBaselineByAsset === 'function' ? findBaselineByAsset(assetNumber) : null;
+    let register = findRegisterByAsset(assetNumber);
     const existing = findItemByAsset(assetNumber);
     const expectedCount = getRegisterForSurvey().length;
     const baselineCount = typeof getBaselineForSurvey === 'function' ? getBaselineForSurvey().length : 0;
+    const hasExact = !!(baseline || register || existing);
+
+    // 완전 일치가 없으면 끝자리/부분일치 후보
+    if (!hasExact) {
+        const candidates = collectAssetCandidates(assetNumber);
+        if (candidates.length === 1 && allowAutofill && candidates[0].type !== 'exact') {
+            input.value = candidates[0].assetNumber;
+            updateAssetCheckBanner({ allowAutofill: false });
+            return;
+        }
+        if (candidates.length > 1) {
+            renderAssetMatchCandidates(candidates, assetNumber);
+            banner.style.display = 'block';
+            banner.classList.add('is-info');
+            banner.textContent = `부분 일치 ${candidates.length}건입니다. 아래에서 자산번호를 선택하세요.`;
+            return;
+        }
+        if (candidates.length === 1) {
+            renderAssetMatchCandidates(candidates, assetNumber);
+            banner.style.display = 'block';
+            banner.classList.add('is-info');
+            banner.textContent = '부분 일치 1건입니다. 선택하면 전체 자산번호로 채웁니다.';
+            return;
+        }
+    }
 
     if (existing) {
         banner.style.display = 'block';
@@ -574,7 +787,12 @@ function updateAssetCheckBanner() {
 
     // 기준(작년) 대장이 있으면 입력 양식에 작년 정보를 먼저 채우고 비교 패널을 연다
     if (baseline) {
-        applyRegisterToForm(baseline);
+        applyRegisterToForm(baseline, {
+            clearFirst: true,
+            keepAssetNumber: true,
+            keepContext: true,
+            overwriteContext: false
+        });
         if (typeof renderBaselineComparePanel === 'function') {
             renderBaselineComparePanel(baseline, { yearRegister: register });
         }
@@ -601,7 +819,19 @@ function updateAssetCheckBanner() {
             banner.classList.add('is-success');
             banner.textContent = `금년 대장에 있는 예정 자산입니다. 저장하면 "찾음"으로 처리됩니다. (${register.itemName || '이름 없음'})`;
         }
-        applyRegisterToForm(register);
+        applyRegisterToForm(register, {
+            clearFirst: true,
+            keepAssetNumber: true,
+            keepContext: true,
+            overwriteContext: false
+        });
+        return;
+    }
+
+    if (normalizeAsset(assetNumber).length < ASSET_PARTIAL_MIN_LEN) {
+        banner.style.display = 'block';
+        banner.classList.add('is-info');
+        banner.textContent = `부분 검색은 ${ASSET_PARTIAL_MIN_LEN}자 이상 입력하세요.`;
         return;
     }
 
@@ -920,8 +1150,12 @@ function suggestRegisterMapping(headers, savedProfile, rows = []) {
     return mapping;
 }
 
-function applyRegisterMapping(rows, mapping) {
+function applyRegisterMapping(rows, mapping, formSchema = null) {
     const keepExtra = rows.length <= 400;
+    const schema = formSchema
+        || (typeof pendingRegisterImport !== 'undefined' ? pendingRegisterImport?.formSchema : null)
+        || (typeof getSurveyFormSchema === 'function' ? getSurveyFormSchema() : null);
+    const customFields = (schema?.fields || []).filter((field) => field.custom && field.excelHeader);
     return rows.map((row) => {
         const mapped = {};
         REGISTER_SYSTEM_FIELDS.forEach((field) => {
@@ -937,6 +1171,12 @@ function applyRegisterMapping(rows, mapping) {
             });
             if (Object.keys(extra).length) mapped.extra = extra;
         }
+        customFields.forEach((field) => {
+            const raw = row[field.excelHeader];
+            if (raw != null && String(raw).trim() !== '') {
+                mapped[field.key] = String(raw).trim();
+            }
+        });
         if (!mapped.location) {
             mapped.location = [mapped.building, mapped.floor, mapped.room].filter(Boolean).join(' ');
         }
@@ -1008,6 +1248,7 @@ function applyPendingSheet(sheetName) {
     const signature = headerSignature(sheet.headers);
     pending.profile = (pending.profiles || []).find((item) => item.headerSignature === signature) || null;
     pending.mapping = suggestRegisterMapping(sheet.headers, pending.profile, sheet.rows);
+    pending.formSchema = pending.profile?.formSchema || null;
     renderRegisterMappingModal();
 }
 
@@ -1072,11 +1313,21 @@ function renderRegisterMappingModal() {
         select.value = pending.mapping[select.dataset.mapField] || '';
         select.addEventListener('change', (e) => {
             pending.mapping[e.target.dataset.mapField] = e.target.value;
+            // 매핑이 바뀌면 입력폼 항목 후보를 다시 계산
+            pending.formSchema = null;
             renderRegisterMappingModal();
         });
     });
 
-    const mappedRows = applyRegisterMapping(pending.rows.slice(0, 3), pending.mapping);
+    if (typeof renderRegisterFormSchemaSection === 'function') {
+        renderRegisterFormSchemaSection();
+    }
+
+    if (typeof syncPendingFormFieldSelections === 'function') {
+        syncPendingFormFieldSelections();
+    }
+
+    const mappedRows = applyRegisterMapping(pending.rows.slice(0, 3), pending.mapping, pending.formSchema);
     if (mappedRows.length === 0) {
         preview.innerHTML = '<p class="register-empty">자산번호 또는 물품명이 연결된 행이 없습니다.</p>';
         return;
@@ -1154,7 +1405,8 @@ async function handleRegisterImport(file, purpose = 'import') {
             run: analyzed.run,
             profiles,
             mapping: suggestRegisterMapping(analyzed.headers, profile, analyzed.rows),
-            profile
+            profile,
+            formSchema: profile?.formSchema || null
         };
         openRegisterMapModal();
     } catch (error) {
@@ -1171,11 +1423,40 @@ async function confirmRegisterMapping() {
         showToast('자산번호 또는 물품명 열은 반드시 맞춰 주세요', 'error');
         return;
     }
-    const rows = applyRegisterMapping(pending.rows, pending.mapping);
+    if (typeof syncPendingFormFieldSelections === 'function') {
+        syncPendingFormFieldSelections();
+    }
+    if (!pending.formSchema && typeof buildFormSchemaFromMapping === 'function') {
+        pending.formSchema = buildFormSchemaFromMapping(
+            pending.mapping,
+            pending.headers,
+            pending.rows,
+            null
+        );
+    }
+    const rows = applyRegisterMapping(pending.rows, pending.mapping, pending.formSchema);
     if (rows.length === 0) {
         showToast('맞춘 열 기준으로 가져올 행이 없습니다', 'error');
         return;
     }
+
+    const persistSchemaAndProfile = async () => {
+        if (typeof saveFormSchemaToSurvey === 'function' && pending.formSchema) {
+            await saveFormSchemaToSurvey(pending.survey.id, pending.formSchema);
+        }
+        await saveMappingProfile({
+            id: newMasterId('map'),
+            headerSignature: headerSignature(pending.headers),
+            headers: pending.headers,
+            mapping: pending.mapping,
+            formSchema: pending.formSchema || null,
+            fileName: pending.fileName,
+            sheetName: pending.sheetName
+        });
+        if (typeof applyFormSchemaForCurrentSurvey === 'function') {
+            applyFormSchemaForCurrentSurvey();
+        }
+    };
 
     if (pending.purpose === 'baseline') {
         if (!pending.mapping.assetNumber) {
@@ -1199,14 +1480,7 @@ async function confirmRegisterMapping() {
                 return;
             }
             const saved = await saveBaselinesForSurvey(pending.survey.id, baselineRecords);
-            await saveMappingProfile({
-                id: newMasterId('map'),
-                headerSignature: headerSignature(pending.headers),
-                headers: pending.headers,
-                mapping: pending.mapping,
-                fileName: pending.fileName,
-                sheetName: pending.sheetName
-            });
+            await persistSchemaAndProfile();
             closeRegisterMapModal();
             if (saved?.stored === 'local') {
                 showToast(`기준 대장 ${baselineRecords.length}건을 이 기기에 저장했습니다`, 'success');
@@ -1241,14 +1515,7 @@ async function confirmRegisterMapping() {
 
     try {
         const saved = await saveRegistersForSurvey(pending.survey.id, records);
-        await saveMappingProfile({
-            id: newMasterId('map'),
-            headerSignature: headerSignature(pending.headers),
-            headers: pending.headers,
-            mapping: pending.mapping,
-            fileName: pending.fileName,
-            sheetName: pending.sheetName
-        });
+        await persistSchemaAndProfile();
         closeRegisterMapModal();
         if (saved?.stored === 'local') {
             showToast(`${pending.survey.name} 대장 ${records.length}건을 이 기기에 가져왔습니다. 다른 사용자와 공유하려면 서버 권한 배포가 필요합니다`, 'success');
@@ -1257,10 +1524,9 @@ async function confirmRegisterMapping() {
         }
         refreshRegisterViews();
         if (typeof switchTab === 'function' && records.length) {
-            // 대장 올린 직후 내용연수 탭으로 안내
             setTimeout(() => {
-                if (confirm(`대장 ${records.length}건을 가져왔습니다.\n내용연수 분석 탭으로 이동할까요?`)) {
-                    switchTab('usefullife');
+                if (confirm(`대장 ${records.length}건을 가져왔습니다.\n입력 항목이 엑셀 매핑에 맞춰졌습니다. 입력 탭으로 이동할까요?`)) {
+                    switchTab('input');
                 }
             }, 300);
         }
@@ -1555,8 +1821,19 @@ function collectRegisterRows(surveyedIndex) {
 function searchRegisterRows(rows) {
     const term = registerSearchTerm.trim().toLowerCase();
     if (!term) return rows;
-    const parts = term.split(/\s+/);
-    return rows.filter((row) => parts.every((part) => row.haystack.includes(part)));
+    const parts = term.split(/\s+/).filter(Boolean);
+    return rows.filter((row) => {
+        const normAsset = normalizeAsset(row.assetNumber);
+        const digitAsset = assetDigits(row.assetNumber);
+        return parts.every((part) => {
+            if (row.haystack.includes(part)) return true;
+            const np = normalizeAsset(part);
+            const dp = assetDigits(part);
+            if (np && normAsset.includes(np)) return true;
+            if (dp.length >= ASSET_PARTIAL_MIN_LEN && digitAsset.includes(dp)) return true;
+            return false;
+        });
+    });
 }
 
 function sortRegisterRows(rows) {
@@ -1879,3 +2156,11 @@ window.initRegister = initRegister;
 window.startAssetScan = startAssetScan;
 window.getRegisterProgress = getRegisterProgress;
 window.findRegisterByAsset = findRegisterByAsset;
+window.normalizeAsset = normalizeAsset;
+window.assetDigits = assetDigits;
+window.collectAssetCandidates = collectAssetCandidates;
+window.clearAssetMatchCandidates = clearAssetMatchCandidates;
+window.selectAssetCandidate = selectAssetCandidate;
+window.updateAssetCheckBanner = updateAssetCheckBanner;
+window.clearItemEntryFields = clearItemEntryFields;
+window.applyRegisterToForm = applyRegisterToForm;

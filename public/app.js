@@ -1452,6 +1452,8 @@ function initContinuousMode() {
     const cancelFieldConfig = document.getElementById('cancelFieldConfig');
 
     loadFieldModePrefs();
+    if (typeof initFormSchema === 'function') initFormSchema();
+    else if (typeof rebuildFieldConfigOptions === 'function') rebuildFieldConfigOptions();
     setFieldMode(preferFieldModeByDefault(), { toast: false });
 
     toggle?.addEventListener('change', (e) => {
@@ -1478,7 +1480,7 @@ function initContinuousMode() {
         document.body.classList.toggle('context-editing', contextEditing);
         if (contextEditing) {
             showToast('공통값을 수정한 뒤 다시 ✏️을 누르세요', 'info');
-            document.querySelector('[data-context-field="location"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            document.querySelector('[data-context-field="surveyor"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         } else {
             updateFieldContextChips();
             showToast('공통값 잠금', 'success');
@@ -1493,12 +1495,11 @@ function initContinuousMode() {
             const key = chip.dataset.chip;
             const target = document.querySelector(`[data-context-field="${key}"]`);
             target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            const focusId = key === 'location' ? 'building' : key;
-            setTimeout(() => document.getElementById(focusId)?.focus(), 250);
+            setTimeout(() => document.getElementById(key)?.focus(), 250);
         });
     });
 
-    ['surveyor', 'organization', 'building', 'floor', 'room'].forEach((id) => {
+    ['surveyor', 'organization'].forEach((id) => {
         document.getElementById(id)?.addEventListener('input', updateFieldContextChips);
         document.getElementById(id)?.addEventListener('change', updateFieldContextChips);
     });
@@ -1567,6 +1568,19 @@ function truncateChip(value, max = 18) {
     return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
+function setFieldChipValue(chipId, label, value) {
+    const chip = document.getElementById(chipId);
+    if (!chip) return;
+    const labelEl = chip.querySelector('.field-chip-label');
+    const valueEl = chip.querySelector('.field-chip-value');
+    if (labelEl && valueEl) {
+        labelEl.textContent = label;
+        valueEl.textContent = value;
+        return;
+    }
+    chip.textContent = `${label} · ${value}`;
+}
+
 function updateFieldContextChips() {
     const bar = document.getElementById('fieldContextBar');
     if (!bar) return;
@@ -1576,18 +1590,9 @@ function updateFieldContextChips() {
     const org = document.getElementById('organization')?.value?.trim()
         || document.getElementById('organizationSelect')?.value?.trim()
         || '-';
-    const location = [
-        document.getElementById('building')?.value,
-        document.getElementById('floor')?.value,
-        document.getElementById('room')?.value
-    ].map((v) => String(v || '').trim()).filter(Boolean).join(' / ') || '-';
 
-    const chipSurveyor = document.getElementById('chipSurveyor');
-    const chipOrg = document.getElementById('chipOrganization');
-    const chipLoc = document.getElementById('chipLocation');
-    if (chipSurveyor) chipSurveyor.textContent = `조사자 · ${truncateChip(surveyor)}`;
-    if (chipOrg) chipOrg.textContent = `기관 · ${truncateChip(org)}`;
-    if (chipLoc) chipLoc.textContent = `위치 · ${truncateChip(location, 22)}`;
+    setFieldChipValue('chipSurveyor', '조사자', surveyor);
+    setFieldChipValue('chipOrganization', '기관', org);
 }
 
 function refreshRecentLocations() {
@@ -1604,13 +1609,11 @@ function refreshRecentLocations() {
     const source = Array.isArray(items) ? items : [];
     for (let i = source.length - 1; i >= 0 && recent.length < 6; i -= 1) {
         const it = source[i] || {};
-        const building = (it.building || '').trim();
-        const floor = (it.floor || '').trim();
-        const room = (it.room || '').trim();
-        const label = [building, floor, room].filter(Boolean).join(' / ');
+        const label = String(it.location || '').trim()
+            || [it.building, it.floor, it.room].map((v) => String(v || '').trim()).filter(Boolean).join(' ');
         if (!label || seen.has(label)) continue;
         seen.add(label);
-        recent.push({ building, floor, room, label });
+        recent.push({ label });
     }
 
     if (!recent.length) {
@@ -1621,17 +1624,13 @@ function refreshRecentLocations() {
 
     wrap.hidden = false;
     list.innerHTML = recent.map((loc) => (
-        `<button type="button" class="recent-location-chip" data-building="${escapeAttr(loc.building)}" data-floor="${escapeAttr(loc.floor)}" data-room="${escapeAttr(loc.room)}">${escapeHtml(loc.label)}</button>`
+        `<button type="button" class="recent-location-chip" data-location="${escapeAttr(loc.label)}">${escapeHtml(loc.label)}</button>`
     )).join('');
 
     list.querySelectorAll('.recent-location-chip').forEach((btn) => {
         btn.addEventListener('click', () => {
-            const buildingEl = document.getElementById('building');
-            const floorEl = document.getElementById('floor');
-            const roomEl = document.getElementById('room');
-            if (buildingEl) buildingEl.value = btn.dataset.building || '';
-            if (floorEl) floorEl.value = btn.dataset.floor || '';
-            if (roomEl) roomEl.value = btn.dataset.room || '';
+            const locationEl = document.getElementById('location');
+            if (locationEl) locationEl.value = btn.dataset.location || '';
             if (typeof updateLocationPreview === 'function') updateLocationPreview();
             updateFieldContextChips();
             showToast(`위치 적용: ${btn.textContent}`, 'success');
@@ -1653,8 +1652,68 @@ function escapeHtml(value) {
         .replace(/>/g, '&gt;');
 }
 
+function rebuildFieldConfigOptions(formFields) {
+    const list = document.getElementById('fieldCheckboxList');
+    if (!list) return;
+    const fields = formFields || (typeof getActiveSchemaFields === 'function'
+        ? getActiveSchemaFields({ formOnly: true })
+        : null);
+
+    const fallback = [
+        { key: 'surveyor', label: '조사자 이름', required: true },
+        { key: 'organization', label: '기관명' },
+        { key: 'location', label: '사용위치' },
+        { key: 'itemName', label: '물품명', required: true },
+        { key: 'assetNumber', label: '자산번호' },
+        { key: 'holder', label: '사용자' },
+        { key: 'quantity', label: '갯수' },
+        { key: 'acquiredAt', label: '취득일자' },
+        { key: 'usefulLife', label: '내용연수 분류' },
+        { key: 'category', label: '카테고리' },
+        { key: 'manufacturer', label: '제조사' },
+        { key: 'model', label: '모델명' },
+        { key: 'dimensions', label: '치수 정보' },
+        { key: 'color', label: '색상' },
+        { key: 'material', label: '재질' },
+        { key: 'condition', label: '상태' },
+        { key: 'notes', label: '비고' }
+    ];
+
+    const options = (fields && fields.length)
+        ? fields
+            .filter((f) => f.type !== 'hidden')
+            .map((f) => ({
+                key: f.key,
+                label: f.label || f.systemLabel || f.key,
+                required: !!f.required || f.key === 'surveyor' || f.key === 'itemName'
+            }))
+        : fallback;
+
+    // 건물/층/실 옵션은 단일 사용위치로 합쳐 표시
+    const cleaned = [];
+    options.forEach((option) => {
+        if (['building', 'floor', 'room'].includes(option.key)) {
+            if (!cleaned.some((o) => o.key === 'location')) {
+                cleaned.push({ key: 'location', label: '사용위치' });
+            }
+            return;
+        }
+        cleaned.push(option);
+    });
+    list.innerHTML = cleaned.map((field) => `
+        <label class="field-checkbox-item">
+            <input type="checkbox" class="field-checkbox" value="${escapeHtml(field.key)}"
+                ${field.required ? 'checked disabled' : ''}>
+            <span>${escapeHtml(field.label)}${field.required ? ' *' : ''}</span>
+        </label>
+    `).join('');
+}
+
 function openFieldConfigModal() {
     const modal = document.getElementById('fieldConfigModal');
+    if (typeof rebuildFieldConfigOptions === 'function') {
+        rebuildFieldConfigOptions();
+    }
     const checkboxes = modal.querySelectorAll('.field-checkbox');
     checkboxes.forEach((checkbox) => {
         if (!checkbox.disabled) checkbox.checked = selectedFields.includes(checkbox.value);
@@ -1682,13 +1741,20 @@ function saveFieldConfig() {
 function updateMoreFieldsVisibility() {
     const details = document.getElementById('moreFieldsDetails');
     if (!details) return;
-    const optionalSelected = FIELD_MODE_OPTIONAL.some((f) => selectedFields.includes(f));
+    const schemaOptional = typeof getActiveSchemaFields === 'function'
+        ? (getActiveSchemaFields({ formOnly: true }) || [])
+            .filter((f) => f.optionalGroup || f.custom)
+            .map((f) => f.key)
+        : [];
+    const optionalKeys = schemaOptional.length ? schemaOptional : FIELD_MODE_OPTIONAL;
+    const optionalSelected = optionalKeys.some((f) => selectedFields.includes(f));
+    const hasVisibleOptional = !!details.querySelector('[data-field]:not(.schema-hidden):not(.hidden), #schemaExtraFields:not([hidden]) [data-field]');
     if (!continuousMode) {
-        details.hidden = false;
-        details.open = true;
+        details.hidden = !hasVisibleOptional;
+        details.open = hasVisibleOptional;
         return;
     }
-    details.hidden = !optionalSelected;
+    details.hidden = !optionalSelected || !hasVisibleOptional;
     if (!optionalSelected) details.open = false;
 }
 
@@ -1696,6 +1762,10 @@ function applyFieldVisibility() {
     const allFields = document.querySelectorAll('#itemForm [data-field]');
     allFields.forEach((field) => {
         const fieldName = field.getAttribute('data-field');
+        if (field.classList.contains('schema-hidden')) {
+            field.classList.add('hidden');
+            return;
+        }
         if (!continuousMode || selectedFields.includes(fieldName)) {
             field.classList.remove('hidden');
         } else {
@@ -1704,7 +1774,8 @@ function applyFieldVisibility() {
     });
     const scanWrap = document.querySelector('.scan-primary-wrap');
     if (scanWrap) {
-        const showScan = !continuousMode || selectedFields.includes('assetNumber');
+        const schemaHidesAsset = document.querySelector('#itemForm [data-field="assetNumber"]')?.classList.contains('schema-hidden');
+        const showScan = !schemaHidesAsset && (!continuousMode || selectedFields.includes('assetNumber'));
         scanWrap.classList.toggle('hidden', !showScan);
     }
     updateMoreFieldsVisibility();
@@ -1712,6 +1783,10 @@ function applyFieldVisibility() {
 
 function showAllFields() {
     document.querySelectorAll('#itemForm [data-field], .scan-primary-wrap').forEach((field) => {
+        if (field.classList.contains('schema-hidden')) {
+            field.classList.add('hidden');
+            return;
+        }
         field.classList.remove('hidden');
     });
     updateMoreFieldsVisibility();
@@ -1729,22 +1804,25 @@ function focusAfterFieldSave() {
 }
 
 function resetFormKeepCommon() {
-    const formData = new FormData(itemForm);
-    const commonValues = {};
+    // 현장 공통(조사자·기관)만 유지하고, 위치 포함 이번 건 입력값은 초기화
+    const commonValues = {
+        surveyor: document.getElementById('surveyor')?.value || '',
+        organization: document.getElementById('organization')?.value || ''
+    };
 
-    selectedFields.forEach((field) => {
-        const value = formData.get(field);
-        if (value && field !== 'itemName' && field !== 'assetNumber') {
-            commonValues[field] = value;
-        }
-    });
-    ['building', 'floor', 'room', 'organization', 'surveyor', 'quantity', 'category', 'condition'].forEach((field) => {
-        const value = document.getElementById(field)?.value;
-        if (value) commonValues[field] = value;
-    });
+    if (typeof clearItemEntryFields === 'function') {
+        clearItemEntryFields({ keepAssetNumber: false, keepContext: true });
+    } else {
+        itemForm.reset();
+        Object.keys(commonValues).forEach((field) => {
+            const input = document.getElementById(field);
+            if (input) input.value = commonValues[field];
+        });
+        const quantity = document.getElementById('quantity');
+        if (quantity) quantity.value = '1';
+    }
 
-    itemForm.reset();
-
+    // clearItemEntryFields가 비운 뒤 공통값 재적용
     Object.keys(commonValues).forEach((field) => {
         const input = document.getElementById(field);
         if (input) input.value = commonValues[field];
@@ -1754,20 +1832,22 @@ function resetFormKeepCommon() {
         if (orgSelect) orgSelect.value = commonValues.organization;
         currentOrganization = commonValues.organization;
     }
-    if (typeof updateLocationPreview === 'function') updateLocationPreview();
 
-    if (!commonValues.quantity) {
-        document.getElementById('quantity').value = '1';
+    const quantity = document.getElementById('quantity');
+    if (quantity) quantity.value = '1';
+    const assetBanner = document.getElementById('assetCheckBanner');
+    if (assetBanner) {
+        assetBanner.style.display = 'none';
+        assetBanner.textContent = '';
+        assetBanner.className = 'asset-check-banner';
     }
-    ['goodsClNo', 'goodsClNm', 'usefulLife'].forEach((id) => {
-        const el = document.getElementById(id);
-        if (el) el.value = '';
-    });
-    if (typeof refreshUsefulLifeUi === 'function') refreshUsefulLifeUi({ force: true });
 
+    if (typeof updateLocationPreview === 'function') updateLocationPreview();
+    if (typeof refreshUsefulLifeUi === 'function') refreshUsefulLifeUi({ force: true });
     syncChoiceChips();
     updateFieldContextChips();
     refreshRecentLocations();
+    if (typeof clearAssetMatchCandidates === 'function') clearAssetMatchCandidates();
     contextEditing = false;
     document.body.classList.remove('context-editing');
     focusAfterFieldSave();
@@ -1775,6 +1855,7 @@ function resetFormKeepCommon() {
 
 function resetFormAfterAdd() {
     if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
+    if (typeof clearAssetMatchCandidates === 'function') clearAssetMatchCandidates();
     if (continuousMode) {
         resetFormKeepCommon();
         return;
@@ -1796,6 +1877,7 @@ function resetFormAfterAdd() {
         assetBanner.style.display = 'none';
         assetBanner.textContent = '';
     }
+    if (typeof clearAssetMatchCandidates === 'function') clearAssetMatchCandidates();
 }
 
 
@@ -2053,10 +2135,9 @@ function openEditModal(id) {
     document.getElementById('editId').value = item.id;
     document.getElementById('editSurveyor').value = item.surveyor || '';
     document.getElementById('editOrganization').value = item.organization || '';
-    document.getElementById('editBuilding').value = item.building || '';
-    document.getElementById('editFloor').value = item.floor || '';
-    document.getElementById('editRoom').value = item.room || '';
-    document.getElementById('editLocation').value = item.location || '';
+    document.getElementById('editLocation').value = item.location
+        || [item.building, item.floor, item.room].map((v) => String(v || '').trim()).filter(Boolean).join(' ')
+        || '';
     document.getElementById('editItemName').value = item.itemName || '';
     document.getElementById('editAssetNumber').value = item.assetNumber || '';
     document.getElementById('editQuantity').value = item.quantity || '';
@@ -2244,7 +2325,24 @@ function applyItemFilters(source) {
             item.organization, item.location, item.assetNumber, item.building,
             item.floor, item.room, item.surveyName
         ].map((value) => String(value || '').toLowerCase()).join(' ');
-        const matchesSearch = !searchTerm || haystack.includes(searchTerm);
+        let matchesSearch = !searchTerm || haystack.includes(searchTerm);
+        if (!matchesSearch && searchTerm && typeof normalizeAsset === 'function') {
+            const parts = searchTerm.split(/\s+/).filter(Boolean);
+            const normAsset = normalizeAsset(item.assetNumber);
+            const digitAsset = typeof assetDigits === 'function'
+                ? assetDigits(item.assetNumber)
+                : String(item.assetNumber || '').replace(/\D/g, '');
+            matchesSearch = parts.every((part) => {
+                if (haystack.includes(part)) return true;
+                const np = normalizeAsset(part);
+                const dp = typeof assetDigits === 'function'
+                    ? assetDigits(part)
+                    : String(part || '').replace(/\D/g, '');
+                if (np && normAsset.includes(np)) return true;
+                if (dp.length >= 3 && digitAsset.includes(dp)) return true;
+                return false;
+            });
+        }
         const matchesCategory = !category || item.category === category;
         const matchesOrganization = !organization || item.organization === organization;
         const matchesCondition = !condition || item.condition === condition;

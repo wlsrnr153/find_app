@@ -7,9 +7,6 @@ const BASELINE_COMPARE_FIELDS = [
     { key: 'holder', label: '사용자', formId: 'holder' },
     { key: 'organization', label: '기관/부서', formId: 'organization' },
     { key: 'location', label: '사용위치', formId: 'location' },
-    { key: 'building', label: '건물', formId: 'building' },
-    { key: 'floor', label: '층', formId: 'floor' },
-    { key: 'room', label: '실/호', formId: 'room' },
     { key: 'itemName', label: '물품명', formId: 'itemName' },
     { key: 'goodsClNm', label: '분류명', formId: 'goodsClNm' },
     { key: 'condition', label: '상태', formId: 'condition' },
@@ -277,10 +274,23 @@ function clearBaselineComparePanel() {
 
 function applyBaselineToForm(record) {
     if (typeof applyRegisterToForm === 'function') {
-        applyRegisterToForm(record);
+        // 사용자가 고친 값을 지운 뒤 기준 정보로 덮어쓴다
+        applyRegisterToForm(record, {
+            clearFirst: true,
+            keepAssetNumber: true,
+            keepContext: true,
+            overwriteContext: true
+        });
     }
     const holder = document.getElementById('holder');
-    if (holder && record.holder) holder.value = record.holder;
+    if (holder) holder.value = record.holder || '';
+}
+
+function getEffectiveBaselineCompareFields() {
+    const fromSchema = typeof getBaselineCompareFieldsFromSchema === 'function'
+        ? getBaselineCompareFieldsFromSchema()
+        : null;
+    return (fromSchema && fromSchema.length) ? fromSchema : BASELINE_COMPARE_FIELDS;
 }
 
 function renderBaselineComparePanel(record, options = {}) {
@@ -288,7 +298,8 @@ function renderBaselineComparePanel(record, options = {}) {
     if (!panel || !record) return;
     activeBaselineRecord = record;
     const yearReg = options.yearRegister || null;
-    const rows = BASELINE_COMPARE_FIELDS
+    const compareFields = getEffectiveBaselineCompareFields();
+    const rows = compareFields
         .map((field) => {
             const value = normalizeBaselineValue(record[field.key]);
             if (!value && field.key !== 'itemName' && field.key !== 'organization') return '';
@@ -313,7 +324,8 @@ function renderBaselineComparePanel(record, options = {}) {
         refill.addEventListener('click', () => {
             applyBaselineToForm(record);
             if (typeof syncChoiceChips === 'function') syncChoiceChips();
-            showToast('기준 대장 정보로 다시 채웠습니다', 'info');
+            if (typeof clearAssetMatchCandidates === 'function') clearAssetMatchCandidates();
+            showToast('입력값을 지우고 기준 정보로 다시 채웠습니다', 'info');
         });
     }
 }
@@ -321,7 +333,7 @@ function renderBaselineComparePanel(record, options = {}) {
 function collectBaselineFormChanges(formData, baselineRecord = activeBaselineRecord) {
     if (!baselineRecord) return [];
     const changes = [];
-    BASELINE_COMPARE_FIELDS.forEach((field) => {
+    getEffectiveBaselineCompareFields().forEach((field) => {
         const fromBaseline = normalizeBaselineValue(baselineRecord[field.key]);
         let fromForm = '';
         if (formData && formData[field.key] != null) {
@@ -329,20 +341,24 @@ function collectBaselineFormChanges(formData, baselineRecord = activeBaselineRec
         } else if (field.formId) {
             fromForm = normalizeBaselineValue(document.getElementById(field.formId)?.value);
         }
-        // location은 건물/층/실 조합일 수 있음
         if (field.key === 'location' && !fromForm) {
-            fromForm = normalizeBaselineValue([
-                formData?.building || document.getElementById('building')?.value,
-                formData?.floor || document.getElementById('floor')?.value,
-                formData?.room || document.getElementById('room')?.value
+            fromForm = normalizeBaselineValue(formData?.location || document.getElementById('location')?.value);
+        }
+        // 기준 대장에 건물/층/실만 있으면 location으로 합쳐 비교
+        let baselineValue = fromBaseline;
+        if (field.key === 'location' && !baselineValue && baselineRecord) {
+            baselineValue = normalizeBaselineValue([
+                baselineRecord.building,
+                baselineRecord.floor,
+                baselineRecord.room
             ].filter(Boolean).join(' '));
         }
-        if (!fromForm && !fromBaseline) return;
-        if (fromForm === fromBaseline) return;
+        if (!fromForm && !baselineValue) return;
+        if (fromForm === baselineValue) return;
         changes.push({
             field: field.key,
             label: field.label,
-            from: fromBaseline,
+            from: baselineValue,
             to: fromForm
         });
     });
