@@ -11,6 +11,8 @@ let scanCameraIndex = 0;
 /** 'environment' = 후면, 'user' = 전면 — deviceId보다 facingMode가 기기 호환성이 높음 */
 let scanFacingMode = 'environment';
 let scanActiveDeviceId = '';
+/** 세션 중 후면 deviceId 캐시 — 매번 프로브/다중 오픈 방지 */
+let cachedRearDeviceId = '';
 let scanSwitching = false;
 let pendingAssetOverride = false;
 let unsubscribeRegisterChunks = null;
@@ -2368,28 +2370,29 @@ function updateScanControlUi(caps = getScanTrackCapabilities()) {
     }
 }
 
-async function ensureCameraPermission() {
-    if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error('getUserMedia unsupported');
-    }
-    // 전면 폴백(video:true) 금지 — 권한이 전면으로 고정되는 기기 있음
-    let stream = null;
-    const videos = [
-        { facingMode: { exact: 'environment' } },
-        { facingMode: 'environment' }
-    ];
-    let lastError = null;
-    for (const video of videos) {
-        try {
-            stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
-            break;
-        } catch (error) {
-            lastError = error;
-        }
-    }
-    if (!stream) throw lastError || new Error('rear camera permission failed');
-    stream.getTracks().forEach((track) => track.stop());
-    await delayScan(300);
+function setScanLoading(on, message) {
+    const el = document.getElementById('scanLoading');
+    if (!el) return;
+    if (message) el.textContent = message;
+    el.hidden = !on;
+}
+
+function rememberRearDeviceId(deviceId) {
+    if (!deviceId) return;
+    cachedRearDeviceId = deviceId;
+    scanActiveDeviceId = deviceId;
+    try {
+        sessionStorage.setItem('findScanRearDeviceId', deviceId);
+    } catch (_) {}
+}
+
+function loadCachedRearDeviceId() {
+    if (cachedRearDeviceId) return cachedRearDeviceId;
+    try {
+        const saved = sessionStorage.getItem('findScanRearDeviceId') || '';
+        if (saved) cachedRearDeviceId = saved;
+    } catch (_) {}
+    return cachedRearDeviceId;
 }
 
 async function loadScanCameraList() {
@@ -2428,61 +2431,54 @@ function listRearCameraDeviceIds(excludeId = '', options = {}) {
 }
 
 /**
- * getUserMedia로 후면을 직접 열어 deviceId를 확정한다.
- * html5-qrcode만 쓰면 라벨 없는 기기에서 전면 deviceId가 먼저 선택되는 문제가 있음.
+ * 캐시가 없고 facingMode 시작이 실패/전면일 때만 1회 프로브.
+ * (예전엔 권한+프로브+스캔으로 카메라를 2~3번 열었음)
  */
 async function probeRearCameraDevice() {
     if (!navigator.mediaDevices?.getUserMedia) return null;
-    const videos = [
-        { facingMode: { exact: 'environment' } },
-        { facingMode: 'environment' }
-    ];
-
-    for (const video of videos) {
-        let stream = null;
+    let stream = null;
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: { exact: 'environment' } }
+        });
+    } catch (_) {
         try {
-            stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
-            const track = stream.getVideoTracks()[0];
-            if (!track) {
-                stream.getTracks().forEach((t) => t.stop());
-                continue;
-            }
-            const settings = track.getSettings?.() || {};
-            const label = String(track.label || settings.label || '');
-            const facing = settings.facingMode || '';
-            const deviceId = settings.deviceId || '';
-
-            stream.getTracks().forEach((t) => t.stop());
-            await delayScan(350);
-
-            if (facing === 'user' || /front|user|전면|selfie|face/i.test(label)) {
-                console.warn('후면 프로브인데 전면이 열림, 건너뜀', { facing, label });
-                continue;
-            }
-            return {
-                deviceId,
-                facingMode: facing === 'environment' ? 'environment' : 'environment',
-                label
-            };
+            stream = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: { facingMode: 'environment' }
+            });
         } catch (error) {
-            if (stream) stream.getTracks().forEach((t) => t.stop());
-            console.warn('후면 프로브 실패:', video, error);
+            console.warn('후면 프로브 실패:', error);
+            return null;
         }
     }
-    return null;
+    try {
+        const track = stream.getVideoTracks()[0];
+        const settings = track?.getSettings?.() || {};
+        const label = String(track?.label || settings.label || '');
+        const facing = settings.facingMode || '';
+        const deviceId = settings.deviceId || '';
+        if (facing === 'user' || /front|user|전면|selfie|face/i.test(label)) {
+            return null;
+        }
+        if (deviceId) rememberRearDeviceId(deviceId);
+        return { deviceId, facingMode: 'environment', label };
+    } finally {
+        stream.getTracks().forEach((t) => t.stop());
+        await delayScan(120);
+    }
 }
 
-function buildRearCameraConfigs(excludeDeviceId = '', probedDeviceId = '') {
-    // 순서 중요: facingMode 먼저 → 프로브/라벨된 후면 deviceId
-    // 라벨 없는 전체 deviceId를 facingMode보다 먼저 넣으면 전면이 열림
+function buildRearCameraConfigs(excludeDeviceId = '') {
     const configs = [];
+    const cached = loadCachedRearDeviceId();
+    if (cached && cached !== excludeDeviceId) configs.push(cached);
+    // facingMode를 deviceId보다 앞에 두면 캐시 미스 시에도 1회 시도로 끝나는 경우가 많음
     configs.push({ facingMode: { exact: 'environment' } });
     configs.push({ facingMode: 'environment' });
-    if (probedDeviceId && probedDeviceId !== excludeDeviceId) {
-        configs.push(probedDeviceId);
-    }
     listRearCameraDeviceIds(excludeDeviceId, { allowUnlabeledHeuristic: true }).forEach((id) => {
-        if (id !== probedDeviceId) configs.push(id);
+        if (id !== cached) configs.push(id);
     });
     return configs;
 }
@@ -2703,7 +2699,7 @@ function getScanFormats() {
     return formats;
 }
 
-async function stopHtml5ScannerInstance() {
+async function stopHtml5ScannerInstance(options = {}) {
     if (!html5Scanner) return;
     try {
         await html5Scanner.stop();
@@ -2712,8 +2708,9 @@ async function stopHtml5ScannerInstance() {
         html5Scanner.clear();
     } catch (_) {}
     html5Scanner = null;
-    // 트랙 해제 직후 재오픈 시 이전이 다시 열리거나 NotReadable 나는 기기 대비
-    await delayScan(350);
+    // 재시도 직전에만 짧게 대기 (모달 닫을 때는 0)
+    const settleMs = options.settleMs == null ? 0 : Number(options.settleMs);
+    if (settleMs > 0) await delayScan(settleMs);
 }
 
 function buildScannerStartConfig(apple) {
@@ -2794,61 +2791,76 @@ function isOpenedCameraFront() {
     return null; // 알 수 없음
 }
 
-/** 현장 실사: 후면만 연다. 전면으로 열리면 실패 처리하고 다음 후보. */
+/**
+ * 후면만 연다. 빠른 경로: 캐시 deviceId → facingMode 1~2회 → (실패 시) 프로브 1회 후 deviceId.
+ * 예전: 권한 오픈+프로브 오픈+스캔 오픈(+고정 sleep)으로 2~5초 지연.
+ */
 async function startRearScanner(options = {}) {
     const excludeId = options.excludeDeviceId || '';
     const previousDeviceId = scanActiveDeviceId;
     const previousFacing = scanFacingMode;
-    await loadScanCameraList();
-
-    let probedId = '';
-    try {
-        const probed = await probeRearCameraDevice();
-        if (probed?.deviceId) probedId = probed.deviceId;
-    } catch (_) {}
-
-    const attempts = buildRearCameraConfigs(excludeId, probedId);
     let lastError = null;
     let openedFrontOnce = false;
 
-    for (const config of attempts) {
+    const tryStart = async (config) => {
+        clearScanEnhanceTimers();
+        await stopHtml5ScannerInstance({ settleMs: html5Scanner ? 100 : 0 });
+        await startHtml5ScannerWithCamera(config);
+        syncScanFacingFromTrack();
+        const openedId = getScanTrackSettings().deviceId || scanActiveDeviceId || '';
+        const front = isOpenedCameraFront();
+        if (front === true) {
+            openedFrontOnce = true;
+            await stopHtml5ScannerInstance({ settleMs: 100 });
+            return false;
+        }
+        if (options.requireDeviceChange && previousDeviceId && openedId && openedId === previousDeviceId) {
+            await stopHtml5ScannerInstance({ settleMs: 100 });
+            return false;
+        }
+        scanFacingMode = 'environment';
+        if (openedId) rememberRearDeviceId(openedId);
+        return true;
+    };
+
+    // 1) 캐시 / facingMode (프로브 없이 바로 프리뷰)
+    for (const config of buildRearCameraConfigs(excludeId)) {
         try {
-            clearScanEnhanceTimers();
-            await stopHtml5ScannerInstance();
-            await startHtml5ScannerWithCamera(config);
-            syncScanFacingFromTrack();
-            const openedId = getScanTrackSettings().deviceId || scanActiveDeviceId || '';
-            const front = isOpenedCameraFront();
-
-            if (front === true) {
-                openedFrontOnce = true;
-                console.warn('전면이 열려 후보 스킵:', config);
-                continue;
-            }
-            if (options.requireDeviceChange && previousDeviceId && openedId && openedId === previousDeviceId) {
-                console.warn('deviceId 미변경, 다음 후면 후보');
-                continue;
-            }
-
-            scanFacingMode = 'environment';
-            if (openedId) scanActiveDeviceId = openedId;
-            return true;
+            if (await tryStart(config)) return true;
         } catch (error) {
             lastError = error;
             console.warn('후면 카메라 시작 실패:', config, error);
-            await stopHtml5ScannerInstance();
+            await stopHtml5ScannerInstance({ settleMs: 80 });
         }
     }
 
+    // 2) 그래도 안 되면 프로브 1회로 deviceId 확보 후 재시도
+    setScanLoading(true, '후면 카메라 확인 중…');
+    try {
+        await loadScanCameraList();
+        const probed = await probeRearCameraDevice();
+        const fallbackIds = [];
+        if (probed?.deviceId && probed.deviceId !== excludeId) fallbackIds.push(probed.deviceId);
+        listRearCameraDeviceIds(excludeId, { allowUnlabeledHeuristic: true }).forEach((id) => {
+            if (!fallbackIds.includes(id)) fallbackIds.push(id);
+        });
+        for (const id of fallbackIds) {
+            try {
+                if (await tryStart(id)) return true;
+            } catch (error) {
+                lastError = error;
+                await stopHtml5ScannerInstance({ settleMs: 80 });
+            }
+        }
+    } finally {
+        setScanLoading(true, '후면 카메라 연결 중…');
+    }
+
     scanFacingMode = previousFacing;
-    if (openedFrontOnlyError(openedFrontOnce, lastError)) {
+    if (openedFrontOnce && !lastError) {
         throw new Error('rear camera unavailable: front only');
     }
     throw lastError || new Error('rear camera start failed');
-}
-
-function openedFrontOnlyError(openedFrontOnce, lastError) {
-    return openedFrontOnce && !lastError;
 }
 
 async function switchScanCamera() {
@@ -2869,17 +2881,17 @@ async function switchScanCamera() {
             let lastError = null;
             for (const id of rearOthers) {
                 try {
-                    await stopHtml5ScannerInstance();
+                    await stopHtml5ScannerInstance({ settleMs: 100 });
                     await startHtml5ScannerWithCamera(id);
                     syncScanFacingFromTrack();
                     if (isOpenedCameraFront() === true) continue;
                     scanFacingMode = 'environment';
-                    scanActiveDeviceId = getScanTrackSettings().deviceId || id;
+                    rememberRearDeviceId(getScanTrackSettings().deviceId || id);
                     switched = true;
                     break;
                 } catch (error) {
                     lastError = error;
-                    await stopHtml5ScannerInstance();
+                    await stopHtml5ScannerInstance({ settleMs: 80 });
                 }
             }
             if (!switched) {
@@ -2916,8 +2928,10 @@ async function startAssetScan() {
     const modal = document.getElementById('scanModal');
     const reader = document.getElementById('qrReader');
     if (!modal || !reader) return;
+    // 모달·로딩을 먼저 보여 체감 대기 감소
     modal.classList.add('show');
     document.body.style.overflow = 'hidden';
+    setScanLoading(true, '후면 카메라 연결 중…');
     scanTorchOn = false;
     scanZoom = 1;
     scanFacingMode = 'environment';
@@ -2931,21 +2945,18 @@ async function startAssetScan() {
     if (controls) controls.hidden = true;
 
     if (typeof Html5Qrcode === 'undefined') {
+        setScanLoading(false);
         if (fallback) fallback.style.display = 'block';
         return;
     }
 
     try {
-        scanActiveDeviceId = '';
-        await stopHtml5ScannerInstance();
-        await ensureCameraPermission();
-        await loadScanCameraList();
-        // Android 일부: 권한·enumerate 직후 바로 start하면 전면이 열림
-        await delayScan(isAppleMobileBrowser() ? 200 : 600);
+        loadCachedRearDeviceId();
+        await stopHtml5ScannerInstance({ settleMs: 0 });
         await startRearScanner();
         syncScanFacingFromTrack();
         if (isOpenedCameraFront() === true) {
-            await stopHtml5ScannerInstance();
+            await stopHtml5ScannerInstance({ settleMs: 0 });
             throw new Error('rear camera unavailable: front only');
         }
         if (isAppleMobileBrowser()) {
@@ -2964,6 +2975,9 @@ async function startAssetScan() {
         } else {
             showToast('후면 카메라를 열 수 없습니다. 사진으로 스캔하거나 직접 입력하세요.', 'error');
         }
+    } finally {
+        setScanLoading(false);
+        updateScanControlUi();
     }
 }
 
@@ -2972,7 +2986,8 @@ async function stopAssetScan() {
     clearScanEnhanceTimers();
     scanTorchOn = false;
     scanSwitching = false;
-    await stopHtml5ScannerInstance();
+    setScanLoading(false);
+    await stopHtml5ScannerInstance({ settleMs: 0 });
     const controls = document.getElementById('scanControls');
     if (controls) controls.hidden = true;
     if (modal) modal.classList.remove('show');

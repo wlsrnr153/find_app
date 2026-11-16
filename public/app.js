@@ -1969,13 +1969,9 @@ async function handleAddItem(e) {
     if (typeof applyItemLocationFields === 'function') {
         applyItemLocationFields(data);
     }
-    if (typeof upsertLocationFromItem === 'function') {
-        try {
-            data.location = await upsertLocationFromItem(data) || data.location;
-        } catch (error) {
-            console.warn('위치 마스터 저장 건너뜀:', error);
-            data.location = data.location || [data.building, data.floor, data.room].filter(Boolean).join(' ');
-        }
+    // 위치 문자열만 먼저 확정. 마스터 쓰기는 본저장 후 백그라운드에서 처리
+    if (!data.location) {
+        data.location = [data.building, data.floor, data.room].filter(Boolean).join(' ');
     }
     
     // 사용자 정보 추가
@@ -2058,65 +2054,78 @@ async function handleAddItem(e) {
     
     try {
         const docRef = await db.collection('items').add(payload);
-        let baselineChangeCount = 0;
-        try {
-            if (typeof applyBaselineSurveyResult === 'function' && payload.assetNumber) {
-                const baselineResult = await applyBaselineSurveyResult(
-                    payload.assetNumber,
-                    docRef.id,
-                    payload,
-                    baselineSnapshot
-                );
-                baselineChangeCount = baselineResult?.changes?.length || 0;
-                if (baselineResult?.matchedBaseline) {
-                    const baselineMeta = { baselineMatched: true };
-                    if (baselineChangeCount) {
-                        baselineMeta.baselineChangeCount = baselineChangeCount;
-                        baselineMeta.baselineChangedFields = (baselineResult.changes || []).map((c) => c.field);
-                    }
-                    await docRef.set(baselineMeta, { merge: true });
-                }
-            } else if (typeof markRegisterFound === 'function' && payload.assetNumber) {
-                await markRegisterFound(payload.assetNumber, docRef.id, {
-                    condition: payload.condition,
-                    holder: payload.holder,
-                    location: payload.location,
-                    itemName: payload.itemName,
-                    organization: payload.organization,
-                    quantity: payload.quantity,
-                    category: payload.category,
-                    model: payload.model,
-                    manufacturer: payload.manufacturer
-                });
-            }
-        } catch (baselineError) {
-            // 실사 저장은 성공한 상태 — 기준/금년 대장 후처리 실패로 전체 실패 처리하지 않음
-            console.warn('기준 대장 후처리 실패:', baselineError);
-            showToast('저장은 완료됐지만 기준 대장 반영에 실패했습니다', 'info');
-        }
-        if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
-        if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
         console.log('✅ 물품 등록 완료! 문서ID:', docRef.id);
-        console.log('⏳ 실시간 리스너가 곧 이 변경사항을 감지합니다...');
-        console.log('   리스너 등록 상태:', isListenerRegistered ? '✅ 등록됨' : '❌ 미등록');
-        console.log('   초기 로드 완료:', initialLoadComplete ? '✅ 완료' : '❌ 미완료');
-        
-        // 🎉 물품 등록 알림 (더 명확하게)
-        if (baselineChangeCount > 0) {
-            showToast(`✅ "${payload.itemName || '물품'}" 등록 · 기준 대비 ${baselineChangeCount}개 항목 변경 반영`, 'success');
-        } else {
-            showToast(`✅ "${payload.itemName || '물품'}" 등록 완료!`, 'success');
+
+        // 본저장 성공 즉시 UI 복귀 — 대장/위치 후처리는 백그라운드
+        showToast(`✅ "${payload.itemName || '물품'}" 등록 완료!`, 'success');
+        if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
+        resetFormAfterAdd();
+        isSubmitting = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalBtnText;
         }
-        
-        // 브라우저 알림 (선택사항 - 권한 있을 경우)
+
+        const runPostSave = async () => {
+            try {
+                if (typeof upsertLocationFromItem === 'function') {
+                    await upsertLocationFromItem(payload);
+                }
+            } catch (locError) {
+                console.warn('위치 마스터 저장 건너뜀:', locError);
+            }
+            try {
+                let baselineChangeCount = 0;
+                if (typeof applyBaselineSurveyResult === 'function' && payload.assetNumber) {
+                    const baselineResult = await applyBaselineSurveyResult(
+                        payload.assetNumber,
+                        docRef.id,
+                        payload,
+                        baselineSnapshot
+                    );
+                    baselineChangeCount = baselineResult?.changes?.length || 0;
+                    if (baselineResult?.matchedBaseline) {
+                        const baselineMeta = { baselineMatched: true };
+                        if (baselineChangeCount) {
+                            baselineMeta.baselineChangeCount = baselineChangeCount;
+                            baselineMeta.baselineChangedFields = (baselineResult.changes || []).map((c) => c.field);
+                        }
+                        await docRef.set(baselineMeta, { merge: true });
+                    }
+                } else if (typeof markRegisterFound === 'function' && payload.assetNumber) {
+                    await markRegisterFound(payload.assetNumber, docRef.id, {
+                        condition: payload.condition,
+                        holder: payload.holder,
+                        location: payload.location,
+                        itemName: payload.itemName,
+                        organization: payload.organization,
+                        quantity: payload.quantity,
+                        category: payload.category,
+                        model: payload.model,
+                        manufacturer: payload.manufacturer
+                    });
+                }
+                if (baselineChangeCount > 0) {
+                    showToast(`기준 대비 ${baselineChangeCount}개 항목 변경 반영`, 'info');
+                }
+            } catch (baselineError) {
+                console.warn('기준 대장 후처리 실패:', baselineError);
+                showToast('저장은 완료됐지만 기준 대장 반영에 실패했습니다', 'info');
+            }
+            if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
+        };
+        // 다음 입력에 방해되지 않게 후처리만 비동기
+        Promise.resolve().then(() => runPostSave()).catch((err) => {
+            console.warn('저장 후처리 실패:', err);
+        });
+
         if ('Notification' in window && Notification.permission === 'granted') {
             new Notification('물품 등록 완료', {
                 body: `${payload.itemName || '물품'}이(가) 등록되었습니다.`,
                 icon: '/favicon.ico'
             });
         }
-        
-        resetFormAfterAdd();
+        return false;
     } catch (error) {
         console.error('등록 오류:', error);
         if (typeof isOfflineError === 'function' && isOfflineError(error) && typeof saveItemOffline === 'function') {

@@ -740,6 +740,20 @@ body.dark-mode .survey-input-banner.is-closed {
     color: var(--text-secondary);
 }
 
+.scan-loading {
+    margin: 0 0 10px;
+    padding: 10px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    background: var(--gray-100, #f3f4f6);
+    border-radius: 8px;
+}
+
+.scan-loading[hidden] {
+    display: none !important;
+}
+
 .scan-controls {
     display: flex;
     flex-wrap: wrap;
