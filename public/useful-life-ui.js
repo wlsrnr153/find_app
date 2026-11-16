@@ -1,6 +1,6 @@
 // 내용연수 후보를 카드로 고르고, 같은 이름은 다음에 자동 확정되게 학습한다
 
-const USEFUL_LIFE_UI_DEBOUNCE_MS = 280;
+const USEFUL_LIFE_UI_DEBOUNCE_MS = 520;
 const USEFUL_LIFE_UI_INLINE_LIMIT = 4;
 
 let usefulLifeUiTimer = null;
@@ -185,6 +185,11 @@ async function refreshUsefulLifeUi(options = {}) {
 function scheduleUsefulLifeUiRefresh(prefix) {
     clearTimeout(usefulLifeUiTimer);
     usefulLifeUiTimer = setTimeout(() => {
+        // 입력 탭이 아니거나 내용연수 블록이 숨겨져 있으면 스킵
+        const inputTab = document.getElementById('input');
+        const ulBlock = document.querySelector('#itemForm [data-field="usefulLife"]');
+        if (inputTab && !inputTab.classList.contains('active')) return;
+        if (ulBlock && (ulBlock.classList.contains('hidden') || ulBlock.classList.contains('schema-hidden'))) return;
         usefulLifeUiManual = false;
         refreshUsefulLifeUi({ prefix: prefix || '', force: true });
     }, USEFUL_LIFE_UI_DEBOUNCE_MS);

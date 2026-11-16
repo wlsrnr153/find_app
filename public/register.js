@@ -8,9 +8,26 @@ let unsubscribeRegisterChunks = null;
 let registerChunkSurveyId = '';
 let refreshRegisterViewsTimer = null;
 let assetSearchIndex = null;
+let itemAssetIndex = null;
+let itemAssetIndexSurveyId = '';
+/** 같은 자산번호로 기준/대장 자동채움을 반복하지 않기 위한 가드 */
+let lastAutofilledAssetNorm = '';
 
 function invalidateAssetSearchIndex() {
     assetSearchIndex = null;
+}
+
+function invalidateItemAssetIndex() {
+    itemAssetIndex = null;
+    itemAssetIndexSurveyId = '';
+}
+
+function resetAssetAutofillGuard() {
+    lastAutofilledAssetNorm = '';
+}
+
+function markAssetAutofilled(assetNumber) {
+    lastAutofilledAssetNorm = normalizeAsset(assetNumber);
 }
 
 function setRegisterItems(list) {
@@ -71,28 +88,50 @@ function buildAssetSearchIndex(surveyId) {
         return assetSearchIndex;
     }
     const entries = [];
+    const registerByNorm = new Map();
+    const baselineByNorm = new Map();
     getRegisterForSurvey(sid).forEach((record) => {
         if (!record?.assetNumber) return;
+        const norm = normalizeAsset(record.assetNumber);
+        if (!norm) return;
+        if (!registerByNorm.has(norm)) registerByNorm.set(norm, record);
         entries.push({
             record,
             source: 'register',
-            norm: normalizeAsset(record.assetNumber),
+            norm,
             digits: assetDigits(record.assetNumber)
         });
     });
     if (typeof getBaselineForSurvey === 'function') {
         getBaselineForSurvey(sid).forEach((record) => {
             if (!record?.assetNumber) return;
+            const norm = normalizeAsset(record.assetNumber);
+            if (!norm) return;
+            if (!baselineByNorm.has(norm)) baselineByNorm.set(norm, record);
             entries.push({
                 record,
                 source: 'baseline',
-                norm: normalizeAsset(record.assetNumber),
+                norm,
                 digits: assetDigits(record.assetNumber)
             });
         });
     }
-    assetSearchIndex = { surveyId: sid, entries };
+    assetSearchIndex = { surveyId: sid, entries, registerByNorm, baselineByNorm };
     return assetSearchIndex;
+}
+
+function buildItemAssetIndex() {
+    const sid = typeof currentSurveyId !== 'undefined' ? currentSurveyId : '';
+    if (itemAssetIndex && itemAssetIndexSurveyId === sid) return itemAssetIndex;
+    const map = new Map();
+    const surveyed = typeof getItemsForView === 'function' ? getItemsForView() : [];
+    surveyed.forEach((item) => {
+        const key = normalizeAsset(item.assetNumber);
+        if (key && !map.has(key)) map.set(key, item);
+    });
+    itemAssetIndex = map;
+    itemAssetIndexSurveyId = sid;
+    return map;
 }
 
 function collectAssetCandidates(query, options = {}) {
@@ -189,7 +228,8 @@ function selectAssetCandidate(assetNumber) {
     if (!input) return;
     input.value = String(assetNumber || '').trim();
     clearAssetMatchCandidates();
-    updateAssetCheckBanner({ allowAutofill: false });
+    resetAssetAutofillGuard();
+    updateAssetCheckBanner({ allowAutofill: false, forceFill: true });
     showToast(`자산번호 ${input.value} 선택`, 'success');
 }
 
@@ -210,26 +250,24 @@ function getRegisterForSurvey(surveyId) {
 function findRegisterByAsset(assetNumber, surveyId) {
     const key = normalizeAsset(assetNumber);
     if (!key) return null;
-    return getRegisterForSurvey(surveyId).find((record) => normalizeAsset(record.assetNumber) === key) || null;
+    const sid = surveyId || getRegisterSurveyId();
+    const index = buildAssetSearchIndex(sid);
+    if (index.registerByNorm?.has(key)) return index.registerByNorm.get(key);
+    return null;
 }
 
 function findItemByAsset(assetNumber, excludeId) {
     const key = normalizeAsset(assetNumber);
-    if (!key || typeof getItemsForView !== 'function') return null;
-    return getItemsForView().find((item) =>
-        normalizeAsset(item.assetNumber) === key && item.id !== excludeId
-    ) || null;
+    if (!key) return null;
+    const item = buildItemAssetIndex().get(key);
+    if (!item) return null;
+    if (excludeId && item.id === excludeId) return null;
+    return item;
 }
 
 // 조사된 자산번호를 한 번만 Map으로 만들어 대장 행마다 전체 목록을 훑지 않도록 한다
 function buildSurveyedIndex() {
-    const map = new Map();
-    const surveyed = typeof getItemsForView === 'function' ? getItemsForView() : [];
-    surveyed.forEach((item) => {
-        const key = normalizeAsset(item.assetNumber);
-        if (key && !map.has(key)) map.set(key, item);
-    });
-    return map;
+    return buildItemAssetIndex();
 }
 
 const REGISTER_STATUS = {
@@ -704,14 +742,24 @@ async function markRegisterFound(assetNumber, itemId, extra = {}) {
     const nextStatus = extra.condition && record.condition && extra.condition !== record.condition
         ? 'changed'
         : 'found';
-    await updateRegisterRecord(record.id, {
+    const patch = {
         status: nextStatus,
         foundItemId: itemId || record.foundItemId || '',
         checkedBy: currentUser?.uid || '',
         checkedByEmail: currentUser?.email || '',
         checkedAt: new Date().toISOString(),
         actualCondition: extra.condition || record.actualCondition || ''
+    };
+    // 입력한 사용자·위치 등 실사값을 대장에도 반영
+    ['holder', 'location', 'itemName', 'organization', 'quantity', 'category', 'model', 'manufacturer'].forEach((key) => {
+        if (extra[key] != null && String(extra[key]).trim() !== '') {
+            patch[key] = extra[key];
+            if (String(record[key] || '').trim() !== String(extra[key]).trim() && nextStatus === 'found') {
+                patch.status = 'changed';
+            }
+        }
     });
+    await updateRegisterRecord(record.id, patch);
 }
 
 function clearItemEntryFields(options = {}) {
@@ -748,6 +796,8 @@ function clearItemEntryFields(options = {}) {
     const quantity = document.getElementById('quantity');
     if (quantity && !preserve.has('quantity')) quantity.value = '1';
 
+    if (!keepAssetNumber) resetAssetAutofillGuard();
+
     if (typeof refreshUsefulLifeUi === 'function') refreshUsefulLifeUi({ force: true });
     if (typeof syncChoiceChips === 'function') syncChoiceChips();
     if (typeof updateLocationPreview === 'function') updateLocationPreview();
@@ -756,7 +806,9 @@ function clearItemEntryFields(options = {}) {
 }
 
 function applyRegisterToForm(record, options = {}) {
-    if (options.clearFirst) {
+    // 모바일 입력 끊김 방지: 기본은 덮어쓰기만 하고 전체 clear/내용연수 force는 옵션
+    const light = options.light !== false;
+    if (options.clearFirst && !light) {
         clearItemEntryFields({
             keepAssetNumber: options.keepAssetNumber !== false,
             keepContext: options.keepContext === true
@@ -765,11 +817,12 @@ function applyRegisterToForm(record, options = {}) {
     const setValue = (id, value) => {
         const el = document.getElementById(id);
         if (!el) return;
-        if (options.clearFirst) {
-            el.value = value != null ? String(value) : '';
+        const next = value != null ? String(value) : '';
+        if (options.clearFirst && !light) {
+            el.value = next;
             return;
         }
-        if (value != null && String(value).trim() !== '') el.value = value;
+        if (next.trim() !== '') el.value = next;
     };
     const source = typeof flattenMappedExtras === 'function'
         ? flattenMappedExtras(record, typeof getSurveyFormSchema === 'function' ? getSurveyFormSchema() : null)
@@ -779,12 +832,12 @@ function applyRegisterToForm(record, options = {}) {
         || '';
     setValue('itemName', source.itemName || '');
     setValue('location', composedLocation);
-    if (!options.keepContext) {
+    if (!options.keepContext || options.overwriteContext) {
         setValue('organization', source.organization || '');
-    } else if (options.clearFirst && options.overwriteContext) {
-        setValue('organization', source.organization || '');
-    } else if (!options.clearFirst) {
-        setValue('organization', source.organization);
+    } else {
+        // keepContext: 기관은 유지, 비어 있을 때만 채움
+        const orgEl = document.getElementById('organization');
+        if (orgEl && !orgEl.value.trim() && source.organization) orgEl.value = source.organization;
     }
     setValue('holder', source.holder || '');
     setValue('category', source.category || '');
@@ -814,9 +867,17 @@ function applyRegisterToForm(record, options = {}) {
         currentOrganization = source.organization;
     }
     if (typeof updateLocationPreview === 'function') updateLocationPreview();
-    if (typeof refreshUsefulLifeUi === 'function') refreshUsefulLifeUi({ force: true });
     if (typeof syncChoiceChips === 'function') syncChoiceChips();
     if (typeof updateFieldContextChips === 'function') updateFieldContextChips();
+    // 내용연수 UI는 다음 프레임에 가볍게 갱신 (입력 중 메인스레드 양보)
+    if (typeof refreshUsefulLifeUi === 'function' && options.refreshUsefulLife !== false) {
+        const runUl = () => refreshUsefulLifeUi({ force: !!options.forceUsefulLife });
+        if (light && typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => setTimeout(runUl, 0));
+        } else {
+            runUl();
+        }
+    }
 }
 
 function updateAssetCheckBanner(options = {}) {
@@ -826,14 +887,23 @@ function updateAssetCheckBanner(options = {}) {
 
     const assetNumber = input.value.trim();
     const allowAutofill = options.allowAutofill !== false;
+    const wantFill = options.fillForm !== false;
+    const forceFill = options.forceFill === true;
     pendingAssetOverride = false;
     banner.className = 'asset-check-banner';
     banner.style.display = 'none';
     banner.textContent = '';
-    clearAssetMatchCandidates();
-    if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
 
-    if (!assetNumber) return;
+    if (!assetNumber) {
+        resetAssetAutofillGuard();
+        clearAssetMatchCandidates();
+        if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
+        return;
+    }
+
+    const assetNorm = normalizeAsset(assetNumber);
+    // 같은 자산번호면 배너만 갱신하고 폼은 다시 덮지 않음 (수정값 되돌아감 방지)
+    const shouldFill = wantFill && (forceFill || assetNorm !== lastAutofilledAssetNorm);
 
     let baseline = typeof findBaselineByAsset === 'function' ? findBaselineByAsset(assetNumber) : null;
     let register = findRegisterByAsset(assetNumber);
@@ -844,10 +914,11 @@ function updateAssetCheckBanner(options = {}) {
 
     // 완전 일치가 없으면 끝자리/부분일치 후보
     if (!hasExact) {
+        if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
         const candidates = collectAssetCandidates(assetNumber);
         if (candidates.length === 1 && allowAutofill && candidates[0].type !== 'exact') {
             input.value = candidates[0].assetNumber;
-            updateAssetCheckBanner({ allowAutofill: false });
+            updateAssetCheckBanner({ allowAutofill: false, fillForm: wantFill, forceFill });
             return;
         }
         if (candidates.length > 1) {
@@ -864,9 +935,13 @@ function updateAssetCheckBanner(options = {}) {
             banner.textContent = '부분 일치 1건입니다. 선택하면 전체 자산번호로 채웁니다.';
             return;
         }
+        clearAssetMatchCandidates();
+    } else {
+        clearAssetMatchCandidates();
     }
 
     if (existing) {
+        if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
         banner.style.display = 'block';
         banner.classList.add('is-danger');
         banner.textContent = `이미 등록된 자산번호입니다. (${existing.itemName || '물품'}) 저장하면 중복으로 남습니다.`;
@@ -874,14 +949,21 @@ function updateAssetCheckBanner(options = {}) {
         return;
     }
 
+    const fillOptions = {
+        light: true,
+        keepAssetNumber: true,
+        keepContext: true,
+        overwriteContext: false,
+        refreshUsefulLife: true,
+        forceUsefulLife: false
+    };
+
     // 기준(작년) 대장이 있으면 입력 양식에 작년 정보를 먼저 채우고 비교 패널을 연다
     if (baseline) {
-        applyRegisterToForm(baseline, {
-            clearFirst: true,
-            keepAssetNumber: true,
-            keepContext: true,
-            overwriteContext: false
-        });
+        if (shouldFill) {
+            applyRegisterToForm(baseline, fillOptions);
+            markAssetAutofilled(assetNumber);
+        }
         if (typeof renderBaselineComparePanel === 'function') {
             renderBaselineComparePanel(baseline, { yearRegister: register });
         }
@@ -896,6 +978,8 @@ function updateAssetCheckBanner(options = {}) {
         return;
     }
 
+    if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
+
     if (register) {
         banner.style.display = 'block';
         if (register.status === 'found' || register.status === 'changed') {
@@ -908,12 +992,10 @@ function updateAssetCheckBanner(options = {}) {
             banner.classList.add('is-success');
             banner.textContent = `금년 대장에 있는 예정 자산입니다. 저장하면 "찾음"으로 처리됩니다. (${register.itemName || '이름 없음'})`;
         }
-        applyRegisterToForm(register, {
-            clearFirst: true,
-            keepAssetNumber: true,
-            keepContext: true,
-            overwriteContext: false
-        });
+        if (shouldFill) {
+            applyRegisterToForm(register, fillOptions);
+            markAssetAutofilled(assetNumber);
+        }
         return;
     }
 
@@ -940,7 +1022,11 @@ function updateAssetCheckBanner(options = {}) {
 
 function scheduleAssetCheck() {
     clearTimeout(assetCheckTimer);
-    assetCheckTimer = setTimeout(updateAssetCheckBanner, 250);
+    // 모바일 타이핑 끊김 완화: 디바운스를 조금 더 길게
+    const delay = (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 767px)').matches)
+        ? 450
+        : 280;
+    assetCheckTimer = setTimeout(() => updateAssetCheckBanner({ fillForm: true }), delay);
 }
 
 async function confirmAssetDuplicate() {
@@ -1819,7 +1905,8 @@ function fillFromRegister(registerId) {
     const assetInput = document.getElementById('assetNumber');
     if (assetInput) assetInput.value = record.assetNumber || '';
     applyRegisterToForm(record);
-    updateAssetCheckBanner();
+    markAssetAutofilled(record.assetNumber);
+    updateAssetCheckBanner({ fillForm: false });
     showToast('대장 항목을 입력 폼에 채웠습니다', 'success');
 }
 
@@ -1864,21 +1951,23 @@ function registerRowLocation(source) {
         || '';
 }
 
-function buildRegisterRow(source, statusKey, kind) {
+function buildRegisterRow(source, statusKey, kind, surveyedItem = null) {
+    const live = surveyedItem || null;
     const row = {
         id: source.id,
         kind,
         statusKey,
         assetNumber: source.assetNumber || '',
-        itemName: source.itemName || '',
-        location: registerRowLocation(source),
-        quantity: source.quantity || '',
-        category: source.category || '',
-        model: source.model || '',
+        itemName: (live?.itemName || source.itemName || ''),
+        holder: (live?.holder || source.holder || ''),
+        location: live?.location || registerRowLocation(source),
+        quantity: live?.quantity || source.quantity || '',
+        category: live?.category || source.category || '',
+        model: live?.model || source.model || '',
         checkedBy: String(source.checkedByEmail || '').split('@')[0]
     };
     row.haystack = [
-        row.assetNumber, row.itemName, row.location, row.category, row.model,
+        row.assetNumber, row.itemName, row.holder, row.location, row.category, row.model,
         row.checkedBy, source.organization, REGISTER_STATUS[statusKey]?.label
     ].filter(Boolean).join(' ').toLowerCase();
     return row;
@@ -1898,9 +1987,16 @@ function collectRegisterRows(surveyedIndex) {
             .map((item) => buildRegisterRow(item, 'new', 'item'));
     }
 
-    const rows = scoped.map((record) =>
-        buildRegisterRow(record, resolveRegisterStatus(record, surveyedIndex), 'register')
-    );
+    const rows = scoped.map((record) => {
+        const key = normalizeAsset(record.assetNumber);
+        const surveyedItem = key && surveyedIndex?.get ? surveyedIndex.get(key) : null;
+        return buildRegisterRow(
+            record,
+            resolveRegisterStatus(record, surveyedIndex),
+            'register',
+            surveyedItem
+        );
+    });
     if (registerFilter === 'pending') return rows.filter((row) => row.statusKey === 'pending');
     if (registerFilter === 'found') return rows.filter((row) => row.statusKey === 'found' || row.statusKey === 'changed');
     if (registerFilter === 'missing') return rows.filter((row) => row.statusKey === 'missing');
@@ -1955,6 +2051,7 @@ function registerRowHtml(row) {
             <td><span class="register-status ${status.cls}">${status.label}</span></td>
             <td class="register-cell-asset">${escapeHtml(row.assetNumber || '-')}</td>
             <td class="register-cell-name">${escapeHtml(row.itemName || '이름 없음')}</td>
+            <td>${escapeHtml(row.holder || '-')}</td>
             <td>${escapeHtml(row.location || '-')}</td>
             <td class="col-optional">${escapeHtml(row.quantity || '-')}</td>
             <td class="col-optional">${escapeHtml(row.category || '-')}</td>
@@ -2065,7 +2162,8 @@ function refreshRegisterViews() {
         updateRegisterList({ preserveWindow: true, surveyedIndex });
     }
     if (isTabActive('input') || document.getElementById('assetNumber')?.value) {
-        updateAssetCheckBanner({ allowAutofill: false });
+        // 대장 실시간 갱신 때는 배너만 갱신 (입력 중인 수정값 보호)
+        updateAssetCheckBanner({ allowAutofill: false, fillForm: false });
     }
     if (typeof refreshUsefulLifeRegisterTab === 'function' && isTabActive('usefullife')) {
         refreshUsefulLifeRegisterTab();
@@ -2136,7 +2234,8 @@ function applyScannedAsset(text) {
     const input = document.getElementById('assetNumber');
     if (!input) return;
     input.value = String(text || '').trim();
-    updateAssetCheckBanner();
+    resetAssetAutofillGuard();
+    updateAssetCheckBanner({ forceFill: true });
     showToast(`자산번호 ${input.value}를 잡았습니다`, 'success');
     const itemName = document.getElementById('itemName');
     if (itemName && !itemName.value.trim()) {
@@ -2151,7 +2250,8 @@ function initRegister() {
     if (assetInput && !assetInput.dataset.bound) {
         assetInput.dataset.bound = 'true';
         assetInput.addEventListener('input', scheduleAssetCheck);
-        assetInput.addEventListener('blur', updateAssetCheckBanner);
+        // blur 시 배너만 갱신 — 기본 fillForm:true면 다른 칸 수정값이 기준정보로 되돌아감
+        assetInput.addEventListener('blur', () => updateAssetCheckBanner({ fillForm: false }));
     }
 
     const scanBtn = document.getElementById('scanAssetBtn');
@@ -2264,6 +2364,10 @@ window.refreshRegisterViews = refreshRegisterViews;
 window.scheduleRefreshRegisterViews = scheduleRefreshRegisterViews;
 window.listenRegisterChunks = listenRegisterChunks;
 window.invalidateAssetSearchIndex = invalidateAssetSearchIndex;
+window.invalidateItemAssetIndex = invalidateItemAssetIndex;
+window.buildAssetSearchIndex = buildAssetSearchIndex;
+window.resetAssetAutofillGuard = resetAssetAutofillGuard;
+window.markAssetAutofilled = markAssetAutofilled;
 window.confirmAssetDuplicate = confirmAssetDuplicate;
 window.markRegisterFound = markRegisterFound;
 window.fillFromRegister = fillFromRegister;

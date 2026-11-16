@@ -60,6 +60,11 @@ function findBaselineByAsset(assetNumber, surveyId) {
         ? normalizeAsset(assetNumber)
         : String(assetNumber || '').trim().toLowerCase().replace(/[\s\-_.]/g, '');
     if (!key) return null;
+    if (typeof buildAssetSearchIndex === 'function') {
+        const index = buildAssetSearchIndex(surveyId || getBaselineSurveyId());
+        if (index?.baselineByNorm?.has(key)) return index.baselineByNorm.get(key);
+        return null;
+    }
     return getBaselineForSurvey(surveyId).find((record) => {
         const recordKey = typeof normalizeAsset === 'function'
             ? normalizeAsset(record.assetNumber)
@@ -316,13 +321,19 @@ function applyBaselineToForm(record) {
         // 사용자가 고친 값을 지운 뒤 기준 정보로 덮어쓴다
         applyRegisterToForm(record, {
             clearFirst: true,
+            light: false,
             keepAssetNumber: true,
             keepContext: true,
-            overwriteContext: true
+            overwriteContext: true,
+            forceUsefulLife: true
         });
     }
     const holder = document.getElementById('holder');
     if (holder) holder.value = record.holder || '';
+    // 다시 채운 뒤에는 같은 자산번호로 자동채움이 반복되지 않게 가드
+    if (typeof markAssetAutofilled === 'function') {
+        markAssetAutofilled(record?.assetNumber);
+    }
 }
 
 function getEffectiveBaselineCompareFields() {
@@ -432,7 +443,17 @@ async function applyBaselineSurveyResult(assetNumber, itemId, formData = {}, bas
             await updateRegisterRecord(yearRegister.id, patch);
         }
     } else if (typeof markRegisterFound === 'function') {
-        await markRegisterFound(assetNumber, itemId, { condition: formData.condition });
+        await markRegisterFound(assetNumber, itemId, {
+            condition: formData.condition,
+            holder: formData.holder,
+            location: formData.location,
+            itemName: formData.itemName,
+            organization: formData.organization,
+            quantity: formData.quantity,
+            category: formData.category,
+            model: formData.model,
+            manufacturer: formData.manufacturer
+        });
     }
 
     return { changes, matchedBaseline: !!baseline };

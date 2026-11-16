@@ -571,8 +571,12 @@ function switchTab(tabName) {
     } else if (tabName === 'usefullife') {
         if (typeof refreshUsefulLifeRegisterTab === 'function') refreshUsefulLifeRegisterTab();
     } else if (tabName === 'list') {
-        // 🔥 핵심: loadItems()가 알아서 중복 체크함
-        loadItems(); // 내부에서 이미 등록되어 있으면 데이터만 표시 (읽기 0회)
+        // 입력 탭에서 미뤄 둔 목록 DOM을 강제 갱신
+        if (typeof invalidateItemAssetIndex === 'function') invalidateItemAssetIndex();
+        const sortedItems = sortItems(getItemsForView(), currentSort);
+        displayItems(sortedItems, { force: true });
+        updateItemCount();
+        loadItems();
     }
 }
 
@@ -901,16 +905,19 @@ function setupUserRealtimeListener() {
             const changeReads = addedCount + modifiedCount + removedCount;
             totalReads += changeReads;
             console.log(`🔄 변경사항: ➕${addedCount} ✏️${modifiedCount} 🗑️${removedCount} (읽기 ${changeReads}회)`);
-            
-            // 화면 업데이트
-            if (searchInput && (searchInput.value || filterCategory.value || document.getElementById('filterOrganization')?.value || document.getElementById('filterCondition')?.value)) {
-                filterItems();
-            } else {
-                const sortedItems = sortItems(getItemsForView(), currentSort);
-                displayItems(sortedItems);
+            if (typeof invalidateItemAssetIndex === 'function') invalidateItemAssetIndex();
+
+            // 입력 탭이면 목록 DOM 갱신은 미룸
+            if (!document.getElementById('input')?.classList.contains('active')) {
+                if (searchInput && (searchInput.value || filterCategory.value || document.getElementById('filterOrganization')?.value || document.getElementById('filterCondition')?.value)) {
+                    filterItems();
+                } else {
+                    const sortedItems = sortItems(getItemsForView(), currentSort);
+                    displayItems(sortedItems);
+                }
+                updateDashboard();
             }
             updateItemCount();
-            updateDashboard();
         }
     }, (error) => {
         console.error('❌ 실시간 리스너 오류:', error);
@@ -1117,6 +1124,7 @@ function setupAdminRealtimeListener(query) {
                     console.log(`🔄 변경사항 총계: ➕${addedCount} ✏️${modifiedCount} 🗑️${removedCount} (읽기 ${changeReads}회)`);
                     console.log(`📊 총 읽기 횟수: ${totalReads}회 (세션 시작 후 ${Math.floor((Date.now() - sessionStart) / 1000)}초)`);
                     console.log(`📦 현재 items 배열: ${items.length}개 항목`);
+                    if (typeof invalidateItemAssetIndex === 'function') invalidateItemAssetIndex();
                     
                     // 데이터 변경 시 전체 개수 업데이트 (추가/삭제만)
                     if (addedCount > 0 || removedCount > 0) {
@@ -1132,7 +1140,15 @@ function setupAdminRealtimeListener(query) {
             
             // 로딩 숨기기
             if (listLoading) listLoading.style.display = 'none';
+
+            if (typeof invalidateItemAssetIndex === 'function') invalidateItemAssetIndex();
             
+            // 입력 탭이면 목록 DOM 갱신은 미룸 (타이핑 체감 보호)
+            if (document.getElementById('input')?.classList.contains('active') && !isInitialLoad) {
+                updateItemCount();
+                return;
+            }
+
             // 🔥 검색 상태 유지: 검색어가 있으면 필터링 적용
             console.log(`🖼️ 화면 업데이트 시작... (items: ${items.length}개)`);
             if (searchInput && (searchInput.value || filterCategory.value || document.getElementById('filterOrganization')?.value || document.getElementById('filterCondition')?.value)) {
@@ -1142,7 +1158,7 @@ function setupAdminRealtimeListener(query) {
                 console.log(`📋 전체 목록 표시 중... (정렬: ${currentSort})`);
                 // 🔥 정렬 적용: 최신순으로 표시
                 const sortedItems = sortItems(getItemsForView(), currentSort);
-                displayItems(sortedItems);
+                displayItems(sortedItems, isInitialLoad ? { force: true } : undefined);
             }
             updateItemCount();
             updateDashboard();
@@ -1186,9 +1202,15 @@ function setupAdminRealtimeListener(query) {
 }
 
 // 물품 목록 표시
-function displayItems(itemsToShow) {
+function displayItems(itemsToShow, options = {}) {
     const listEl = document.getElementById('itemList') || itemList;
     if (!listEl) return;
+
+    // 입력 탭에서는 목록 DOM 재생성을 건너뛰어 타이핑/저장 체감을 지킨다
+    if (!options.force && document.getElementById('input')?.classList.contains('active')) {
+        if (typeof invalidateItemAssetIndex === 'function') invalidateItemAssetIndex();
+        return;
+    }
 
     // 🔥 중요: currentUser 확인
     if (!currentUser) {
@@ -1278,6 +1300,11 @@ function displayItems(itemsToShow) {
                 ${item.assetNumber ? `
                     <div class="info-item">
                         <span class="info-label">자산번호:</span> ${item.assetNumber}
+                    </div>
+                ` : ''}
+                ${item.holder ? `
+                    <div class="info-item">
+                        <span class="info-label">사용자:</span> ${item.holder}
                     </div>
                 ` : ''}
                 ${item.quantity ? `
@@ -2050,7 +2077,17 @@ async function handleAddItem(e) {
                     await docRef.set(baselineMeta, { merge: true });
                 }
             } else if (typeof markRegisterFound === 'function' && payload.assetNumber) {
-                await markRegisterFound(payload.assetNumber, docRef.id, { condition: payload.condition });
+                await markRegisterFound(payload.assetNumber, docRef.id, {
+                    condition: payload.condition,
+                    holder: payload.holder,
+                    location: payload.location,
+                    itemName: payload.itemName,
+                    organization: payload.organization,
+                    quantity: payload.quantity,
+                    category: payload.category,
+                    model: payload.model,
+                    manufacturer: payload.manufacturer
+                });
             }
         } catch (baselineError) {
             // 실사 저장은 성공한 상태 — 기준/금년 대장 후처리 실패로 전체 실패 처리하지 않음
@@ -2140,6 +2177,7 @@ function openEditModal(id) {
         || '';
     document.getElementById('editItemName').value = item.itemName || '';
     document.getElementById('editAssetNumber').value = item.assetNumber || '';
+    document.getElementById('editHolder').value = item.holder || '';
     document.getElementById('editQuantity').value = item.quantity || '';
     document.getElementById('editCategory').value = item.category || '';
     document.getElementById('editManufacturer').value = item.manufacturer || '';
@@ -2321,7 +2359,7 @@ function applyItemFilters(source) {
 
     return (source || getItemsForView()).filter((item) => {
         const haystack = [
-            item.itemName, item.surveyor, item.manufacturer, item.model, item.notes,
+            item.itemName, item.surveyor, item.holder, item.manufacturer, item.model, item.notes,
             item.organization, item.location, item.assetNumber, item.building,
             item.floor, item.room, item.surveyName
         ].map((value) => String(value || '').toLowerCase()).join(' ');
