@@ -6,6 +6,9 @@ let html5Scanner = null;
 let scanTorchOn = false;
 let scanZoom = 1;
 let scanEnhanceTimers = [];
+let scanCameraList = [];
+let scanCameraIndex = 0;
+let scanSwitching = false;
 let pendingAssetOverride = false;
 let unsubscribeRegisterChunks = null;
 let registerChunkSurveyId = '';
@@ -15,6 +18,8 @@ let itemAssetIndex = null;
 let itemAssetIndexSurveyId = '';
 /** 같은 자산번호로 기준/대장 자동채움을 반복하지 않기 위한 가드 */
 let lastAutofilledAssetNorm = '';
+/** 자동채움이 기록한 필드값 — 사용자가 고친 칸은 다시 덮지 않음 */
+let assetAutofillSnapshot = Object.create(null);
 
 function invalidateAssetSearchIndex() {
     assetSearchIndex = null;
@@ -27,6 +32,7 @@ function invalidateItemAssetIndex() {
 
 function resetAssetAutofillGuard() {
     lastAutofilledAssetNorm = '';
+    assetAutofillSnapshot = Object.create(null);
 }
 
 function markAssetAutofilled(assetNumber) {
@@ -811,6 +817,8 @@ function clearItemEntryFields(options = {}) {
 function applyRegisterToForm(record, options = {}) {
     // 모바일 입력 끊김 방지: 기본은 덮어쓰기만 하고 전체 clear/내용연수 force는 옵션
     const light = options.light !== false;
+    const protectEdits = options.protectEdits === true;
+    const recordSnapshot = options.recordSnapshot !== false;
     if (options.clearFirst && !light) {
         clearItemEntryFields({
             keepAssetNumber: options.keepAssetNumber !== false,
@@ -823,9 +831,20 @@ function applyRegisterToForm(record, options = {}) {
         const next = value != null ? String(value) : '';
         if (options.clearFirst && !light) {
             el.value = next;
+            if (recordSnapshot) assetAutofillSnapshot[id] = next;
             return;
         }
-        if (next.trim() !== '') el.value = next;
+        if (!next.trim()) return;
+        if (protectEdits) {
+            const current = el.value;
+            const snapped = assetAutofillSnapshot[id];
+            // 사용자가 자동채움 값과 다르게 고친 칸은 유지
+            if (current.trim() !== '' && snapped !== undefined && current !== snapped) {
+                return;
+            }
+        }
+        el.value = next;
+        if (recordSnapshot) assetAutofillSnapshot[id] = next;
     };
     const source = typeof flattenMappedExtras === 'function'
         ? flattenMappedExtras(record, typeof getSurveyFormSchema === 'function' ? getSurveyFormSchema() : null)
@@ -958,7 +977,10 @@ function updateAssetCheckBanner(options = {}) {
         keepContext: true,
         overwriteContext: false,
         refreshUsefulLife: true,
-        forceUsefulLife: false
+        forceUsefulLife: false,
+        // 이미 채워진 뒤 재호출되면 사용자 수정칸은 건너뜀
+        protectEdits: true,
+        recordSnapshot: true
     };
 
     // 기준(작년) 대장이 있으면 입력 양식에 작년 정보를 먼저 채우고 비교 패널을 연다
@@ -1025,11 +1047,34 @@ function updateAssetCheckBanner(options = {}) {
 
 function scheduleAssetCheck() {
     clearTimeout(assetCheckTimer);
+    const input = document.getElementById('assetNumber');
+    const scheduledNorm = normalizeAsset(input?.value || '');
     // 모바일 타이핑 끊김 완화: 디바운스를 조금 더 길게
     const delay = (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 767px)').matches)
         ? 450
         : 280;
-    assetCheckTimer = setTimeout(() => updateAssetCheckBanner({ fillForm: true }), delay);
+    assetCheckTimer = setTimeout(() => {
+        assetCheckTimer = null;
+        const currentNorm = normalizeAsset(document.getElementById('assetNumber')?.value || '');
+        // 입력 중 값이 바뀌었거나, 이미 같은 자산으로 채운 뒤에는 폼을 다시 덮지 않음
+        if (!currentNorm || currentNorm !== scheduledNorm) {
+            updateAssetCheckBanner({ fillForm: false });
+            return;
+        }
+        updateAssetCheckBanner({
+            fillForm: currentNorm !== lastAutofilledAssetNorm
+        });
+    }, delay);
+}
+
+function handleAssetNumberBlur() {
+    // 포커스를 다른 칸으로 옮긴 뒤 늦게 도착하는 fillForm:true 타이머가 수정값을 덮어쓰는 것이 핵심 원인
+    clearTimeout(assetCheckTimer);
+    assetCheckTimer = null;
+    const norm = normalizeAsset(document.getElementById('assetNumber')?.value || '');
+    updateAssetCheckBanner({
+        fillForm: !!(norm && norm !== lastAutofilledAssetNorm)
+    });
 }
 
 async function confirmAssetDuplicate() {
@@ -1907,7 +1952,8 @@ function fillFromRegister(registerId) {
     if (typeof switchTab === 'function') switchTab('input');
     const assetInput = document.getElementById('assetNumber');
     if (assetInput) assetInput.value = record.assetNumber || '';
-    applyRegisterToForm(record);
+    resetAssetAutofillGuard();
+    applyRegisterToForm(record, { protectEdits: false, recordSnapshot: true });
     markAssetAutofilled(record.assetNumber);
     updateAssetCheckBanner({ fillForm: false });
     showToast('대장 항목을 입력 폼에 채웠습니다', 'success');
@@ -2210,11 +2256,23 @@ function isScanZoomSupported(caps = getScanTrackCapabilities()) {
     return !!(caps.zoom && Number(caps.zoom.max) > Number(caps.zoom.min));
 }
 
+function isScanFrontCamera(cam) {
+    return /front|user|전면|selfie|face/i.test(String(cam?.label || ''));
+}
+
+function describeScanCamera(cam) {
+    if (!cam) return '카메라';
+    if (isScanFrontCamera(cam)) return '전면';
+    if (/back|rear|environment|후면|후방|world/i.test(String(cam.label || ''))) return '후면';
+    return cam.label ? String(cam.label).slice(0, 18) : '카메라';
+}
+
 function updateScanControlUi(caps = getScanTrackCapabilities()) {
     const controls = document.getElementById('scanControls');
     const torchBtn = document.getElementById('scanTorchBtn');
     const zoomGroup = document.getElementById('scanZoomGroup');
     const zoomLabel = document.getElementById('scanZoomLabel');
+    const switchBtn = document.getElementById('scanSwitchCameraBtn');
     if (controls) controls.hidden = false;
 
     const torchOk = isScanTorchSupported(caps);
@@ -2227,26 +2285,59 @@ function updateScanControlUi(caps = getScanTrackCapabilities()) {
     const zoomOk = isScanZoomSupported(caps);
     if (zoomGroup) zoomGroup.hidden = !zoomOk;
     if (zoomLabel) zoomLabel.textContent = `${Number(scanZoom || 1).toFixed(1)}×`;
+
+    if (switchBtn) {
+        const canSwitch = scanCameraList.length > 1;
+        switchBtn.hidden = !canSwitch;
+        if (canSwitch) {
+            const current = scanCameraList[scanCameraIndex];
+            const next = scanCameraList[(scanCameraIndex + 1) % scanCameraList.length];
+            switchBtn.textContent = `카메라 전환 (${describeScanCamera(current)}→${describeScanCamera(next)})`;
+        }
+    }
 }
 
-async function resolveScanCamera() {
+function scoreScanCamera(cam, index) {
+    const label = String(cam.label || '').toLowerCase();
+    let score = index;
+    if (/ultra\s*wide|초광각|0\.5/.test(label)) score -= 40;
+    if (/tele|망원|zoom/.test(label)) score -= 10;
+    if (/back|rear|environment|후면|후방|world/.test(label)) score += 30;
+    if (/front|user|전면|selfie|face/.test(label)) score -= 50;
+    return score;
+}
+
+async function loadScanCameraList() {
     try {
         const cameras = await Html5Qrcode.getCameras();
-        if (!cameras?.length) return { facingMode: { ideal: 'environment' } };
-        const scored = cameras.map((cam, index) => {
-            const label = String(cam.label || '').toLowerCase();
-            let score = index;
-            if (/ultra\s*wide|초광각|0\.5/.test(label)) score -= 40;
-            if (/tele|망원|zoom/.test(label)) score -= 10;
-            if (/back|rear|environment|후면|후방|world/.test(label)) score += 30;
-            if (/front|user|전면|selfie/.test(label)) score -= 50;
-            return { cam, score };
+        scanCameraList = Array.isArray(cameras) ? cameras.slice() : [];
+        if (!scanCameraList.length) {
+            scanCameraIndex = 0;
+            return null;
+        }
+        let best = 0;
+        let bestScore = -Infinity;
+        scanCameraList.forEach((cam, index) => {
+            const score = scoreScanCamera(cam, index);
+            if (score > bestScore) {
+                bestScore = score;
+                best = index;
+            }
         });
-        scored.sort((a, b) => b.score - a.score);
-        return scored[0].cam.id;
+        scanCameraIndex = best;
+        return scanCameraList[scanCameraIndex].id;
     } catch (_) {
-        return { facingMode: { ideal: 'environment' } };
+        scanCameraList = [];
+        scanCameraIndex = 0;
+        return null;
     }
+}
+
+function resolveScanCameraConfig() {
+    if (scanCameraList.length && scanCameraList[scanCameraIndex]) {
+        return scanCameraList[scanCameraIndex].id;
+    }
+    return { facingMode: { ideal: 'environment' } };
 }
 
 function buildScanQrbox(viewfinderWidth, viewfinderHeight) {
@@ -2357,6 +2448,7 @@ function bindScanControlButtons() {
     const zoomIn = document.getElementById('scanZoomInBtn');
     const zoomOut = document.getElementById('scanZoomOutBtn');
     const refocus = document.getElementById('scanRefocusBtn');
+    const switchBtn = document.getElementById('scanSwitchCameraBtn');
     if (torchBtn && !torchBtn.dataset.bound) {
         torchBtn.dataset.bound = 'true';
         torchBtn.addEventListener('click', () => setScanTorch(!scanTorchOn));
@@ -2372,6 +2464,102 @@ function bindScanControlButtons() {
     if (refocus && !refocus.dataset.bound) {
         refocus.dataset.bound = 'true';
         refocus.addEventListener('click', () => refocusScanCamera());
+    }
+    if (switchBtn && !switchBtn.dataset.bound) {
+        switchBtn.dataset.bound = 'true';
+        switchBtn.addEventListener('click', () => switchScanCamera());
+    }
+}
+
+function getScanFormats() {
+    const formats = [
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.ITF
+    ];
+    if (Html5QrcodeSupportedFormats.CODABAR != null) formats.push(Html5QrcodeSupportedFormats.CODABAR);
+    if (Html5QrcodeSupportedFormats.DATA_MATRIX != null) formats.push(Html5QrcodeSupportedFormats.DATA_MATRIX);
+    return formats;
+}
+
+async function stopHtml5ScannerInstance() {
+    if (!html5Scanner) return;
+    try {
+        await html5Scanner.stop();
+    } catch (_) {}
+    try {
+        html5Scanner.clear();
+    } catch (_) {}
+    html5Scanner = null;
+}
+
+async function startHtml5ScannerWithCamera(cameraConfig) {
+    html5Scanner = new Html5Qrcode('qrReader', {
+        experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true
+        },
+        verbose: false
+    });
+
+    const videoConstraints = {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        focusMode: 'continuous'
+    };
+    // deviceId와 facingMode를 같이 넣으면 일부 기기에서 카메라 오픈이 실패함
+    if (typeof cameraConfig !== 'string') {
+        Object.assign(videoConstraints, cameraConfig);
+    }
+
+    await html5Scanner.start(
+        cameraConfig,
+        {
+            fps: 12,
+            qrbox: buildScanQrbox,
+            aspectRatio: 1.777778,
+            disableFlip: false,
+            experimentalFeatures: {
+                useBarCodeDetectorIfSupported: true
+            },
+            videoConstraints,
+            formatsToSupport: getScanFormats()
+        },
+        (text) => {
+            applyScannedAsset(text);
+            stopAssetScan();
+        }
+    );
+
+    scanTorchOn = false;
+    scanZoom = 1;
+    scheduleScanEnhance(350, 1.6);
+    scheduleScanEnhance(1200, 1.8);
+    updateScanControlUi();
+}
+
+async function switchScanCamera() {
+    if (scanSwitching || scanCameraList.length < 2) return;
+    scanSwitching = true;
+    const switchBtn = document.getElementById('scanSwitchCameraBtn');
+    if (switchBtn) switchBtn.disabled = true;
+    try {
+        clearScanEnhanceTimers();
+        scanCameraIndex = (scanCameraIndex + 1) % scanCameraList.length;
+        await stopHtml5ScannerInstance();
+        await startHtml5ScannerWithCamera(resolveScanCameraConfig());
+        showToast(`${describeScanCamera(scanCameraList[scanCameraIndex])} 카메라로 전환`, 'success');
+    } catch (error) {
+        console.warn('카메라 전환 실패:', error);
+        showToast('카메라 전환에 실패했습니다', 'error');
+        try {
+            await startHtml5ScannerWithCamera(resolveScanCameraConfig());
+        } catch (_) {}
+    } finally {
+        scanSwitching = false;
+        if (switchBtn) switchBtn.disabled = false;
     }
 }
 
@@ -2397,64 +2585,9 @@ async function startAssetScan() {
     }
 
     try {
-        if (html5Scanner) {
-            try { await html5Scanner.stop(); } catch (_) {}
-            try { html5Scanner.clear(); } catch (_) {}
-            html5Scanner = null;
-        }
-
-        html5Scanner = new Html5Qrcode('qrReader', {
-            experimentalFeatures: {
-                useBarCodeDetectorIfSupported: true
-            },
-            verbose: false
-        });
-
-        const cameraConfig = await resolveScanCamera();
-        const videoConstraints = {
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-            focusMode: 'continuous'
-        };
-        // deviceId와 facingMode를 같이 넣으면 일부 기기에서 카메라 오픈이 실패함
-        if (typeof cameraConfig !== 'string') {
-            Object.assign(videoConstraints, cameraConfig);
-        }
-
-        const formats = [
-            Html5QrcodeSupportedFormats.QR_CODE,
-            Html5QrcodeSupportedFormats.CODE_128,
-            Html5QrcodeSupportedFormats.CODE_39,
-            Html5QrcodeSupportedFormats.EAN_13,
-            Html5QrcodeSupportedFormats.EAN_8,
-            Html5QrcodeSupportedFormats.ITF
-        ];
-        if (Html5QrcodeSupportedFormats.CODABAR != null) formats.push(Html5QrcodeSupportedFormats.CODABAR);
-        if (Html5QrcodeSupportedFormats.DATA_MATRIX != null) formats.push(Html5QrcodeSupportedFormats.DATA_MATRIX);
-
-        await html5Scanner.start(
-            cameraConfig,
-            {
-                fps: 12,
-                qrbox: buildScanQrbox,
-                aspectRatio: 1.777778,
-                disableFlip: false,
-                experimentalFeatures: {
-                    useBarCodeDetectorIfSupported: true
-                },
-                videoConstraints,
-                formatsToSupport: formats
-            },
-            (text) => {
-                applyScannedAsset(text);
-                stopAssetScan();
-            }
-        );
-
-        // 저가형 카메라는 시작 직후·안정화 후 연속초점·약줌을 두 번 적용
-        scheduleScanEnhance(350, 1.6);
-        scheduleScanEnhance(1200, 1.8);
-        updateScanControlUi();
+        await stopHtml5ScannerInstance();
+        await loadScanCameraList();
+        await startHtml5ScannerWithCamera(resolveScanCameraConfig());
     } catch (error) {
         console.warn('카메라 스캔 시작 실패:', error);
         if (fallback) fallback.style.display = 'block';
@@ -2466,19 +2599,8 @@ async function stopAssetScan() {
     const modal = document.getElementById('scanModal');
     clearScanEnhanceTimers();
     scanTorchOn = false;
-    if (html5Scanner) {
-        try {
-            await html5Scanner.stop();
-        } catch (error) {
-            console.warn('스캐너 중지:', error);
-        }
-        try {
-            html5Scanner.clear();
-        } catch (error) {
-            // ignore
-        }
-        html5Scanner = null;
-    }
+    scanSwitching = false;
+    await stopHtml5ScannerInstance();
     const controls = document.getElementById('scanControls');
     if (controls) controls.hidden = true;
     if (modal) modal.classList.remove('show');
@@ -2505,8 +2627,8 @@ function initRegister() {
     if (assetInput && !assetInput.dataset.bound) {
         assetInput.dataset.bound = 'true';
         assetInput.addEventListener('input', scheduleAssetCheck);
-        // blur 시 배너만 갱신 — 기본 fillForm:true면 다른 칸 수정값이 기준정보로 되돌아감
-        assetInput.addEventListener('blur', () => updateAssetCheckBanner({ fillForm: false }));
+        // blur 때 대기 중 fill 타이머를 취소하지 않으면 수정 중인 값이 기준정보로 덮임
+        assetInput.addEventListener('blur', handleAssetNumberBlur);
     }
 
     const scanBtn = document.getElementById('scanAssetBtn');

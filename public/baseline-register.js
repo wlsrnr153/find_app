@@ -317,6 +317,7 @@ function clearBaselineComparePanel() {
 }
 
 function applyBaselineToForm(record) {
+    if (typeof resetAssetAutofillGuard === 'function') resetAssetAutofillGuard();
     if (typeof applyRegisterToForm === 'function') {
         // 사용자가 고친 값을 지운 뒤 기준 정보로 덮어쓴다
         applyRegisterToForm(record, {
@@ -325,7 +326,9 @@ function applyBaselineToForm(record) {
             keepAssetNumber: true,
             keepContext: true,
             overwriteContext: true,
-            forceUsefulLife: true
+            forceUsefulLife: true,
+            protectEdits: false,
+            recordSnapshot: true
         });
     }
     const holder = document.getElementById('holder');

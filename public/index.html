@@ -256,7 +256,7 @@
                 </div>
             </div>
 
-            <form id="itemForm" class="form input-form">
+            <form id="itemForm" class="form input-form" autocomplete="off">
                 <div class="scan-primary-wrap" data-field="assetNumber">
                     <button type="button" id="scanPrimaryBtn" class="btn-scan-primary">📷 스캔해서 등록</button>
                     <p class="scan-primary-hint">바코드·QR을 찍으면 자산번호가 채워집니다</p>
@@ -266,7 +266,8 @@
                     <label for="assetNumber">자산번호</label>
                     <div class="asset-input-row">
                         <input type="text" id="assetNumber" name="assetNumber"
-                               placeholder="전체·끝자리·일부 입력" enterkeyhint="next" inputmode="text" autocomplete="off">
+                               placeholder="전체·끝자리·일부 입력" enterkeyhint="next" inputmode="text"
+                               autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                         <button type="button" id="scanAssetBtn" class="btn btn-secondary btn-scan-inline">📷 스캔</button>
                     </div>
                     <div id="assetMatchCandidates" class="asset-match-candidates" hidden></div>
@@ -850,6 +851,7 @@
                 <p class="scan-help">코드를 프레임 안에 맞추세요. 흐리면 <strong>확대</strong>하거나 <strong>플래시·초점</strong>을 눌러 보세요. 약 15~25cm가 잘 잡힙니다.</p>
                 <div id="qrReader" class="qr-reader"></div>
                 <div id="scanControls" class="scan-controls" hidden>
+                    <button type="button" id="scanSwitchCameraBtn" class="btn btn-secondary btn-small" hidden>카메라 전환</button>
                     <button type="button" id="scanTorchBtn" class="btn btn-secondary btn-small" hidden>플래시</button>
                     <button type="button" id="scanRefocusBtn" class="btn btn-secondary btn-small">초점</button>
                     <div class="scan-zoom-group" id="scanZoomGroup" hidden>
