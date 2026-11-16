@@ -2247,12 +2247,12 @@ function updateScanHelpForPlatform() {
     const hint = document.getElementById('scanPhotoHint');
     if (isAppleMobileBrowser()) {
         if (help) {
-            help.innerHTML = '코드를 프레임 안에 맞추세요. Safari는 라이브 초점이 약할 수 있으니, 흐리면 <strong>사진으로 스캔</strong>을 쓰세요. 약 15~25cm가 잘 잡힙니다.';
+            help.innerHTML = '후면 카메라로 스캔합니다. Safari는 라이브 초점이 약할 수 있으니 흐리면 <strong>사진으로 스캔</strong>을 쓰세요. 약 15~25cm.';
         }
         if (hint) hint.classList.add('is-emphasis');
     } else {
         if (help) {
-            help.innerHTML = '코드를 프레임 안에 맞추세요. 흐리면 <strong>확대</strong>하거나 <strong>플래시·초점</strong>을 눌러 보세요. 약 15~25cm가 잘 잡힙니다.';
+            help.innerHTML = '후면 카메라로 코드를 프레임 안에 맞추세요. 흐리면 <strong>확대</strong>·<strong>플래시</strong> 또는 <strong>사진으로 스캔</strong>. 약 15~25cm.';
         }
         if (hint) hint.classList.remove('is-emphasis');
     }
@@ -2360,11 +2360,11 @@ function updateScanControlUi(caps = getScanTrackCapabilities()) {
     if (zoomLabel) zoomLabel.textContent = `${Number(scanZoom || 1).toFixed(1)}×`;
 
     if (switchBtn) {
-        // facingMode 전환은 카메라 목록 개수와 무관하게 항상 제공
-        switchBtn.hidden = false;
-        const next = scanFacingMode === 'environment' ? 'user' : 'environment';
-        switchBtn.textContent = `${describeFacingMode(next)} 카메라로 전환`;
-        switchBtn.title = `현재: ${describeFacingMode(scanFacingMode)}`;
+        // 현장 실사: 전면 전환 없음. 라벨된 후면 렌즈가 2개 이상일 때만 순환
+        const rearIds = listRearCameraDeviceIds('');
+        switchBtn.hidden = rearIds.length < 2;
+        switchBtn.textContent = '다른 후면 렌즈';
+        switchBtn.title = '초광각/망원 등 다른 후면 카메라로 전환';
     }
 }
 
@@ -2372,19 +2372,24 @@ async function ensureCameraPermission() {
     if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error('getUserMedia unsupported');
     }
-    // 권한 허용 후 enumerateDevices 라벨이 채워지도록 짧게 워밍업
+    // 전면 폴백(video:true) 금지 — 권한이 전면으로 고정되는 기기 있음
     let stream = null;
-    try {
-        stream = await navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: { facingMode: { ideal: 'environment' } }
-        });
-    } catch (_) {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+    const videos = [
+        { facingMode: { exact: 'environment' } },
+        { facingMode: 'environment' }
+    ];
+    let lastError = null;
+    for (const video of videos) {
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
+            break;
+        } catch (error) {
+            lastError = error;
+        }
     }
+    if (!stream) throw lastError || new Error('rear camera permission failed');
     stream.getTracks().forEach((track) => track.stop());
-    // 일부 Android는 트랙 해제 직후 재오픈 시 NotReadableError → 짧게 대기
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await delayScan(300);
 }
 
 async function loadScanCameraList() {
@@ -2397,42 +2402,88 @@ async function loadScanCameraList() {
     return scanCameraList;
 }
 
-function listDeviceIdsForFacing(facing, excludeId = '') {
+/**
+ * 후면(환경) 카메라 deviceId만 — 전면·셀카 제외.
+ * allowUnlabeledHeuristic: 라벨 없을 때만 목록 역순 후보(시작 폴백용). 전환 버튼에는 쓰지 않음.
+ */
+function listRearCameraDeviceIds(excludeId = '', options = {}) {
     if (!scanCameraList.length) return [];
-    const wantFront = facing === 'user';
     const labeled = scanCameraList.filter((cam) => String(cam.label || '').trim());
-
     let pool = [];
+
     if (labeled.length) {
-        pool = scanCameraList.filter((cam) => (
-            wantFront ? isScanFrontCamera(cam) : (isScanBackCamera(cam) || !isScanFrontCamera(cam))
-        ));
-        // 후면 요청인데 back 라벨이 있으면 그것만 우선
-        if (!wantFront) {
-            const backs = scanCameraList.filter((cam) => isScanBackCamera(cam));
-            if (backs.length) pool = backs;
+        const backs = scanCameraList.filter((cam) => isScanBackCamera(cam));
+        if (backs.length) {
+            pool = backs;
         } else {
-            const fronts = scanCameraList.filter((cam) => isScanFrontCamera(cam));
-            if (fronts.length) pool = fronts;
+            // back 라벨은 없고 front만 구분되면, 전면이 아닌 것만
+            pool = scanCameraList.filter((cam) => !isScanFrontCamera(cam));
         }
-    } else if (scanCameraList.length >= 2) {
-        // 라벨 없음: 보통 [전면, 후면] 또는 반대. 현재 기기와 다른 id를 후보로
-        pool = scanCameraList.slice();
-    } else {
-        pool = scanCameraList.slice();
+    } else if (options.allowUnlabeledHeuristic && scanCameraList.length >= 2) {
+        // 라벨 없음: 끝쪽이 후면인 기기가 많아 역순 (facingMode 실패 시 최후 수단)
+        pool = scanCameraList.slice().reverse();
     }
 
-    return pool
-        .map((cam) => cam.id)
-        .filter((id) => id && id !== excludeId);
+    return pool.map((cam) => cam.id).filter((id) => id && id !== excludeId);
 }
 
-function buildFacingConfigs(facing, excludeDeviceId = '') {
-    // html5-qrcode는 facingMode에 string 또는 { exact }만 허용. { ideal }은 예외로 실패함
+/**
+ * getUserMedia로 후면을 직접 열어 deviceId를 확정한다.
+ * html5-qrcode만 쓰면 라벨 없는 기기에서 전면 deviceId가 먼저 선택되는 문제가 있음.
+ */
+async function probeRearCameraDevice() {
+    if (!navigator.mediaDevices?.getUserMedia) return null;
+    const videos = [
+        { facingMode: { exact: 'environment' } },
+        { facingMode: 'environment' }
+    ];
+
+    for (const video of videos) {
+        let stream = null;
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
+            const track = stream.getVideoTracks()[0];
+            if (!track) {
+                stream.getTracks().forEach((t) => t.stop());
+                continue;
+            }
+            const settings = track.getSettings?.() || {};
+            const label = String(track.label || settings.label || '');
+            const facing = settings.facingMode || '';
+            const deviceId = settings.deviceId || '';
+
+            stream.getTracks().forEach((t) => t.stop());
+            await delayScan(350);
+
+            if (facing === 'user' || /front|user|전면|selfie|face/i.test(label)) {
+                console.warn('후면 프로브인데 전면이 열림, 건너뜀', { facing, label });
+                continue;
+            }
+            return {
+                deviceId,
+                facingMode: facing === 'environment' ? 'environment' : 'environment',
+                label
+            };
+        } catch (error) {
+            if (stream) stream.getTracks().forEach((t) => t.stop());
+            console.warn('후면 프로브 실패:', video, error);
+        }
+    }
+    return null;
+}
+
+function buildRearCameraConfigs(excludeDeviceId = '', probedDeviceId = '') {
+    // 순서 중요: facingMode 먼저 → 프로브/라벨된 후면 deviceId
+    // 라벨 없는 전체 deviceId를 facingMode보다 먼저 넣으면 전면이 열림
     const configs = [];
-    listDeviceIdsForFacing(facing, excludeDeviceId).forEach((id) => configs.push(id));
-    configs.push({ facingMode: { exact: facing } });
-    configs.push({ facingMode: facing });
+    configs.push({ facingMode: { exact: 'environment' } });
+    configs.push({ facingMode: 'environment' });
+    if (probedDeviceId && probedDeviceId !== excludeDeviceId) {
+        configs.push(probedDeviceId);
+    }
+    listRearCameraDeviceIds(excludeDeviceId, { allowUnlabeledHeuristic: true }).forEach((id) => {
+        if (id !== probedDeviceId) configs.push(id);
+    });
     return configs;
 }
 
@@ -2730,60 +2781,74 @@ async function startHtml5ScannerWithCamera(cameraConfig) {
     updateScanControlUi();
 }
 
-function facingMatchesRequest(requested, actual) {
-    if (!actual) return false;
-    return actual === requested;
+function isOpenedCameraFront() {
+    const settings = getScanTrackSettings();
+    if (settings.facingMode === 'user') return true;
+    if (settings.facingMode === 'environment') return false;
+    const cam = findScanCameraById(settings.deviceId || scanActiveDeviceId);
+    if (cam && isScanFrontCamera(cam)) return true;
+    if (cam && isScanBackCamera(cam)) return false;
+    const label = String(settings.label || cam?.label || '');
+    if (/front|user|전면|selfie|face/i.test(label)) return true;
+    if (/back|rear|environment|후면|후방/i.test(label)) return false;
+    return null; // 알 수 없음
 }
 
-async function startScannerWithFacing(facing, options = {}) {
-    const preferred = facing === 'user' ? 'user' : 'environment';
-    const excludeId = options.excludeDeviceId || scanActiveDeviceId || '';
-    const previousFacing = scanFacingMode;
+/** 현장 실사: 후면만 연다. 전면으로 열리면 실패 처리하고 다음 후보. */
+async function startRearScanner(options = {}) {
+    const excludeId = options.excludeDeviceId || '';
     const previousDeviceId = scanActiveDeviceId;
+    const previousFacing = scanFacingMode;
     await loadScanCameraList();
-    const attempts = buildFacingConfigs(preferred, excludeId);
+
+    let probedId = '';
+    try {
+        const probed = await probeRearCameraDevice();
+        if (probed?.deviceId) probedId = probed.deviceId;
+    } catch (_) {}
+
+    const attempts = buildRearCameraConfigs(excludeId, probedId);
     let lastError = null;
+    let openedFrontOnce = false;
 
     for (const config of attempts) {
         try {
             clearScanEnhanceTimers();
             await stopHtml5ScannerInstance();
             await startHtml5ScannerWithCamera(config);
-            const actual = syncScanFacingFromTrack();
+            syncScanFacingFromTrack();
             const openedId = getScanTrackSettings().deviceId || scanActiveDeviceId || '';
-            // 후면 요청인데 전면이 열리면 다음 후보 계속 시도
-            if (preferred === 'environment' && actual === 'user') {
-                console.warn('후면 요청인데 전면이 열림, 다음 후보 시도', config);
+            const front = isOpenedCameraFront();
+
+            if (front === true) {
+                openedFrontOnce = true;
+                console.warn('전면이 열려 후보 스킵:', config);
                 continue;
             }
-            // 전환인데 deviceId가 그대로면(둘 다 알 때만) 실패로 보고 다음 시도
             if (options.requireDeviceChange && previousDeviceId && openedId && openedId === previousDeviceId) {
-                console.warn('카메라 deviceId가 바뀌지 않음, 다음 후보 시도');
+                console.warn('deviceId 미변경, 다음 후면 후보');
                 continue;
             }
-            scanFacingMode = actual || preferred;
+
+            scanFacingMode = 'environment';
             if (openedId) scanActiveDeviceId = openedId;
             return true;
         } catch (error) {
             lastError = error;
-            console.warn('카메라 시작 시도 실패:', config, error);
+            console.warn('후면 카메라 시작 실패:', config, error);
             await stopHtml5ScannerInstance();
         }
     }
 
-    // 최후: facingMode 문자열만
-    try {
-        clearScanEnhanceTimers();
-        await stopHtml5ScannerInstance();
-        await startHtml5ScannerWithCamera({ facingMode: preferred });
-        syncScanFacingFromTrack();
-        if (!scanFacingMode) scanFacingMode = preferred;
-        return true;
-    } catch (error) {
-        lastError = error;
-        scanFacingMode = previousFacing;
+    scanFacingMode = previousFacing;
+    if (openedFrontOnlyError(openedFrontOnce, lastError)) {
+        throw new Error('rear camera unavailable: front only');
     }
-    throw lastError || new Error('camera start failed');
+    throw lastError || new Error('rear camera start failed');
+}
+
+function openedFrontOnlyError(openedFrontOnce, lastError) {
+    return openedFrontOnce && !lastError;
 }
 
 async function switchScanCamera() {
@@ -2792,40 +2857,53 @@ async function switchScanCamera() {
     const switchBtn = document.getElementById('scanSwitchCameraBtn');
     if (switchBtn) switchBtn.disabled = true;
 
-    // 실제 트랙 기준으로 현재 방향 재확인
     syncScanFacingFromTrack();
-    const fromFacing = scanFacingMode === 'user' ? 'user' : 'environment';
-    const nextFacing = fromFacing === 'environment' ? 'user' : 'environment';
     const fromDeviceId = scanActiveDeviceId;
+    const rearOthers = listRearCameraDeviceIds(fromDeviceId);
 
     try {
         clearScanEnhanceTimers();
-        await startScannerWithFacing(nextFacing, {
-            excludeDeviceId: fromDeviceId,
-            requireDeviceChange: !!fromDeviceId
-        });
-        syncScanFacingFromTrack();
-
-        if (facingMatchesRequest(nextFacing, scanFacingMode)
-            || (fromDeviceId && scanActiveDeviceId && scanActiveDeviceId !== fromDeviceId)) {
-            showToast(`${describeFacingMode(scanFacingMode)} 카메라로 전환`, 'success');
-        } else if (nextFacing === 'environment' && scanFacingMode === 'user') {
-            showToast('후면 카메라를 열지 못했습니다. 기기 권한/다른 앱 점유를 확인해 주세요.', 'error');
+        if (rearOthers.length) {
+            // 다른 후면 렌즈 deviceId만 순회
+            let switched = false;
+            let lastError = null;
+            for (const id of rearOthers) {
+                try {
+                    await stopHtml5ScannerInstance();
+                    await startHtml5ScannerWithCamera(id);
+                    syncScanFacingFromTrack();
+                    if (isOpenedCameraFront() === true) continue;
+                    scanFacingMode = 'environment';
+                    scanActiveDeviceId = getScanTrackSettings().deviceId || id;
+                    switched = true;
+                    break;
+                } catch (error) {
+                    lastError = error;
+                    await stopHtml5ScannerInstance();
+                }
+            }
+            if (!switched) {
+                await startRearScanner({ excludeDeviceId: fromDeviceId, requireDeviceChange: true });
+            }
+            showToast('다른 후면 렌즈로 전환했습니다', 'success');
         } else {
-            showToast(`${describeFacingMode(scanFacingMode)} 카메라 상태입니다`, 'info');
+            await startRearScanner({ excludeDeviceId: fromDeviceId, requireDeviceChange: true });
+            showToast('후면 카메라를 다시 연결했습니다', 'success');
         }
     } catch (error) {
-        console.warn('카메라 전환 실패:', error);
+        console.warn('후면 렌즈 전환 실패:', error);
         const msg = String(error?.name || error?.message || error || '');
         if (/NotAllowed|Permission/i.test(msg)) {
-            showToast('카메라 권한이 필요합니다. 브라우저/앱 설정에서 허용해 주세요.', 'error');
+            showToast('카메라 권한이 필요합니다. 브라우저 설정에서 허용해 주세요.', 'error');
+        } else if (/front only|rear camera/i.test(msg)) {
+            showToast('후면 카메라만 사용할 수 있습니다. 사진으로 스캔해 보세요.', 'error');
         } else if (/NotReadable|TrackStart|AbortError/i.test(msg)) {
-            showToast('후면 카메라를 다른 앱이 사용 중이거나 기기에서 열 수 없습니다.', 'error');
+            showToast('후면 카메라를 다른 앱이 사용 중이거나 열 수 없습니다.', 'error');
         } else {
-            showToast(`${describeFacingMode(nextFacing)} 카메라 전환에 실패했습니다`, 'error');
+            showToast('후면 카메라 전환에 실패했습니다', 'error');
         }
         try {
-            await startScannerWithFacing(fromFacing);
+            await startRearScanner();
         } catch (_) {}
     } finally {
         scanSwitching = false;
@@ -2860,14 +2938,17 @@ async function startAssetScan() {
     try {
         scanActiveDeviceId = '';
         await stopHtml5ScannerInstance();
-        // 권한 자체는 전면만 막히는 경우가 거의 없음. 후면 실패는 보통 facingMode/deviceId 선택 문제
         await ensureCameraPermission();
         await loadScanCameraList();
-        await startScannerWithFacing('environment');
+        // Android 일부: 권한·enumerate 직후 바로 start하면 전면이 열림
+        await delayScan(isAppleMobileBrowser() ? 200 : 600);
+        await startRearScanner();
         syncScanFacingFromTrack();
-        if (scanFacingMode === 'user') {
-            showToast('후면 대신 전면이 열렸습니다. 「후면 카메라로 전환」을 눌러 보세요.', 'info');
-        } else if (isAppleMobileBrowser()) {
+        if (isOpenedCameraFront() === true) {
+            await stopHtml5ScannerInstance();
+            throw new Error('rear camera unavailable: front only');
+        }
+        if (isAppleMobileBrowser()) {
             showToast('흐리면 「사진으로 스캔」을 사용하세요', 'info');
         }
     } catch (error) {
@@ -2876,10 +2957,12 @@ async function startAssetScan() {
         if (fallback) fallback.style.display = 'block';
         if (/NotAllowed|Permission/i.test(msg)) {
             showToast('카메라 권한이 거부되었습니다. 브라우저 설정에서 허용해 주세요.', 'error');
+        } else if (/front only|rear camera unavailable/i.test(msg)) {
+            showToast('후면 카메라를 열지 못했습니다. 「사진으로 스캔」을 사용해 주세요.', 'error');
         } else if (isAppleMobileBrowser()) {
             showToast('라이브 카메라를 열 수 없습니다. 사진으로 스캔해 보세요.', 'error');
         } else {
-            showToast('카메라를 열 수 없습니다. 자산번호를 직접 입력하세요.', 'error');
+            showToast('후면 카메라를 열 수 없습니다. 사진으로 스캔하거나 직접 입력하세요.', 'error');
         }
     }
 }
