@@ -90,7 +90,8 @@ function refreshVisibleViews() {
     updateOrganizationSelect();
     updateLocationDatalists();
     updateLocationPreview();
-    if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
+    if (typeof scheduleRefreshRegisterViews === 'function') scheduleRefreshRegisterViews();
+    else if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
     if (typeof applyFormSchemaForCurrentSurvey === 'function') applyFormSchemaForCurrentSurvey();
 }
 
@@ -191,13 +192,22 @@ function flattenUserMasters(docs) {
     organizationRecords = nextOrgs.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
     organizations = organizationRecords.map((org) => org.name);
     locations = nextLocations;
+    // 유저문서 대장과 청크 대장(_fromChunk)을 합친다 — 청크를 덮어쓰지 않음
+    const chunkRegisters = (typeof registerItems !== 'undefined' ? registerItems : [])
+        .filter((record) => record && record._fromChunk);
+    const chunkBaselines = (typeof baselineItems !== 'undefined' ? baselineItems : window.baselineItems || [])
+        .filter((record) => record && record._fromChunk);
     if (typeof setRegisterItems === 'function') {
-        setRegisterItems(nextRegisters);
+        setRegisterItems(typeof mergeRegisterLists === 'function'
+            ? mergeRegisterLists(chunkRegisters, nextRegisters)
+            : chunkRegisters.concat(nextRegisters));
     } else {
         window.registerItems = nextRegisters;
     }
     if (typeof setBaselineItems === 'function') {
-        setBaselineItems(nextBaselines);
+        setBaselineItems(typeof mergeBaselineLists === 'function'
+            ? mergeBaselineLists(chunkBaselines, nextBaselines)
+            : chunkBaselines.concat(nextBaselines));
     } else {
         window.baselineItems = nextBaselines;
     }
@@ -205,18 +215,25 @@ function flattenUserMasters(docs) {
         idbReadRegisters().then((localRows) => {
             if (!localRows.length) return;
             const merged = typeof mergeRegisterLists === 'function'
-                ? mergeRegisterLists(nextRegisters, localRows)
+                ? mergeRegisterLists(
+                    (typeof registerItems !== 'undefined' ? registerItems : nextRegisters),
+                    localRows
+                )
                 : nextRegisters.concat(localRows);
             if (typeof setRegisterItems === 'function') setRegisterItems(merged);
             else window.registerItems = merged;
-            if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
+            if (typeof scheduleRefreshRegisterViews === 'function') scheduleRefreshRegisterViews();
+            else if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
         });
     }
     if (typeof idbReadBaselines === 'function') {
         idbReadBaselines().then((localRows) => {
             if (!localRows.length) return;
             const merged = typeof mergeBaselineLists === 'function'
-                ? mergeBaselineLists(nextBaselines, localRows)
+                ? mergeBaselineLists(
+                    (typeof baselineItems !== 'undefined' ? baselineItems : nextBaselines),
+                    localRows
+                )
                 : nextBaselines.concat(localRows);
             if (typeof setBaselineItems === 'function') setBaselineItems(merged);
             else window.baselineItems = merged;
@@ -480,14 +497,19 @@ async function migrateLocalOrganizations() {
 function selectSurvey(surveyId) {
     currentSurveyId = surveyId || SURVEY_ALL;
     localStorage.setItem(SURVEY_STORAGE_KEY, currentSurveyId);
-    if (typeof updateBaselineStatusUi === 'function') updateBaselineStatusUi();
     if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
     if (typeof applyFormSchemaForCurrentSurvey === 'function') applyFormSchemaForCurrentSurvey();
+    // 회차 변경 시 해당 회차 청크만 다시 구독
+    if (typeof listenRegisterChunks === 'function') listenRegisterChunks();
+    if (typeof listenBaselineChunks === 'function') listenBaselineChunks();
+    if (typeof updateBaselineStatusUi === 'function') updateBaselineStatusUi();
+    if (typeof invalidateAssetSearchIndex === 'function') invalidateAssetSearchIndex();
     if (typeof currentUserRole !== 'undefined' && currentUserRole === 'admin'
         && typeof reloadAdminScopedItems === 'function') {
         reloadAdminScopedItems({ toast: true });
         if (typeof updateSurveySelect === 'function') updateSurveySelect();
         if (typeof updateSurveyBanner === 'function') updateSurveyBanner();
+        if (typeof scheduleRefreshRegisterViews === 'function') scheduleRefreshRegisterViews();
         return;
     }
     refreshVisibleViews();

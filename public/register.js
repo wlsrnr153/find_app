@@ -4,10 +4,34 @@ let registerFilter = 'all';
 let assetCheckTimer = null;
 let html5Scanner = null;
 let pendingAssetOverride = false;
+let unsubscribeRegisterChunks = null;
+let registerChunkSurveyId = '';
+let refreshRegisterViewsTimer = null;
+let assetSearchIndex = null;
+
+function invalidateAssetSearchIndex() {
+    assetSearchIndex = null;
+}
 
 function setRegisterItems(list) {
     registerItems = Array.isArray(list) ? list : [];
     window.registerItems = registerItems;
+    invalidateAssetSearchIndex();
+}
+
+function replaceRegisterSurveyRows(surveyId, chunkRows) {
+    if (!surveyId) return;
+    const chunkById = new Map();
+    (chunkRows || []).forEach((record) => {
+        if (record?.id) chunkById.set(record.id, { ...record, _fromChunk: true });
+    });
+    const kept = registerItems.filter((record) => {
+        if (record.surveyId !== surveyId) return true;
+        // 같은 회차: 청크에 없는 유저문서 행만 유지
+        if (record._fromChunk) return false;
+        return !chunkById.has(record.id);
+    });
+    setRegisterItems(kept.concat(Array.from(chunkById.values())));
 }
 
 const ASSET_PARTIAL_MIN_LEN = 3;
@@ -41,35 +65,78 @@ function scoreAssetMatch(query, assetNumber) {
     return null;
 }
 
+function buildAssetSearchIndex(surveyId) {
+    const sid = surveyId || getRegisterSurveyId();
+    if (assetSearchIndex?.surveyId === sid && Array.isArray(assetSearchIndex.entries)) {
+        return assetSearchIndex;
+    }
+    const entries = [];
+    getRegisterForSurvey(sid).forEach((record) => {
+        if (!record?.assetNumber) return;
+        entries.push({
+            record,
+            source: 'register',
+            norm: normalizeAsset(record.assetNumber),
+            digits: assetDigits(record.assetNumber)
+        });
+    });
+    if (typeof getBaselineForSurvey === 'function') {
+        getBaselineForSurvey(sid).forEach((record) => {
+            if (!record?.assetNumber) return;
+            entries.push({
+                record,
+                source: 'baseline',
+                norm: normalizeAsset(record.assetNumber),
+                digits: assetDigits(record.assetNumber)
+            });
+        });
+    }
+    assetSearchIndex = { surveyId: sid, entries };
+    return assetSearchIndex;
+}
+
 function collectAssetCandidates(query, options = {}) {
     const limit = options.limit || ASSET_CANDIDATE_LIMIT;
     const q = normalizeAsset(query);
     if (!q || q.length < ASSET_PARTIAL_MIN_LEN) return [];
 
+    const qd = assetDigits(q);
+    const index = buildAssetSearchIndex(options.surveyId);
     const results = [];
     const seen = new Set();
-    const push = (record, source) => {
-        if (!record?.assetNumber) return;
-        const key = normalizeAsset(record.assetNumber);
-        if (!key || seen.has(key)) return;
-        const score = scoreAssetMatch(query, record.assetNumber);
-        if (!score) return;
-        seen.add(key);
+
+    for (let i = 0; i < index.entries.length; i += 1) {
+        const entry = index.entries[i];
+        if (!entry.norm || seen.has(entry.norm)) continue;
+        let rank = -1;
+        let type = '';
+        if (entry.norm === q) {
+            rank = 0;
+            type = 'exact';
+        } else if (qd.length >= ASSET_PARTIAL_MIN_LEN && entry.digits.endsWith(qd)) {
+            rank = 1;
+            type = 'suffix';
+        } else if (entry.norm.includes(q)) {
+            rank = 2;
+            type = 'contains';
+        } else if (qd.length >= ASSET_PARTIAL_MIN_LEN && entry.digits.includes(qd)) {
+            rank = 3;
+            type = 'digits';
+        }
+        if (rank < 0) continue;
+        seen.add(entry.norm);
+        const record = entry.record;
         results.push({
             record,
-            source,
+            source: entry.source,
             assetNumber: record.assetNumber,
             itemName: record.itemName || '',
             location: record.location
                 || [record.building, record.floor, record.room].filter(Boolean).join(' ')
                 || '',
-            ...score
+            rank,
+            type
         });
-    };
-
-    getRegisterForSurvey(options.surveyId).forEach((record) => push(record, 'register'));
-    if (typeof getBaselineForSurvey === 'function') {
-        getBaselineForSurvey(options.surveyId).forEach((record) => push(record, 'baseline'));
     }
 
     results.sort((a, b) => (
@@ -584,29 +651,51 @@ async function updateRegisterRecordsBulk(entries) {
 
 window.updateRegisterRecordsBulk = updateRegisterRecordsBulk;
 
-let unsubscribeRegisterChunks = null;
+function stopRegisterChunkListener() {
+    if (unsubscribeRegisterChunks) {
+        unsubscribeRegisterChunks();
+        unsubscribeRegisterChunks = null;
+    }
+    registerChunkSurveyId = '';
+}
 
-function listenRegisterChunks() {
-    if (unsubscribeRegisterChunks) return;
-    unsubscribeRegisterChunks = db.collection('registerChunks').onSnapshot((snapshot) => {
-        const chunkRows = [];
-        snapshot.docs.forEach((doc) => {
-            (doc.data()?.rows || []).forEach((record) => {
-                if (record && record.id) chunkRows.push(record);
+function listenRegisterChunks(forceSurveyId) {
+    const surveyId = forceSurveyId || getRegisterSurveyId();
+    if (!surveyId) {
+        stopRegisterChunkListener();
+        return;
+    }
+    if (unsubscribeRegisterChunks && registerChunkSurveyId === surveyId) return;
+
+    stopRegisterChunkListener();
+    registerChunkSurveyId = surveyId;
+
+    // 다른 회차 청크 데이터는 메모리에서 내려 앱을 가볍게 유지
+    const trimmed = registerItems.filter((record) => record.surveyId === surveyId || !record._fromChunk);
+    if (trimmed.length !== registerItems.length) setRegisterItems(trimmed);
+
+    unsubscribeRegisterChunks = db.collection('registerChunks')
+        .where('surveyId', '==', surveyId)
+        .onSnapshot((snapshot) => {
+            const byId = new Map();
+            snapshot.docs.forEach((doc) => {
+                (doc.data()?.rows || []).forEach((record) => {
+                    if (record?.id) byId.set(record.id, record);
+                });
+            });
+            replaceRegisterSurveyRows(surveyId, Array.from(byId.values()));
+            scheduleRefreshRegisterViews();
+        }, (error) => {
+            console.warn('분할 대장 구독 실패:', error);
+            stopRegisterChunkListener();
+            idbReadRegisters().then((localRows) => {
+                if (!localRows.length) return;
+                const scoped = localRows.filter((row) => row.surveyId === surveyId);
+                if (!scoped.length) return;
+                replaceRegisterSurveyRows(surveyId, scoped);
+                scheduleRefreshRegisterViews();
             });
         });
-        const existing = registerItems.filter((record) => !chunkRows.some((row) => row.id === record.id));
-        setRegisterItems(mergeRegisterLists(existing, chunkRows));
-        if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
-    }, (error) => {
-        console.warn('분할 대장 구독 실패:', error);
-        unsubscribeRegisterChunks = null;
-        idbReadRegisters().then((localRows) => {
-            if (!localRows.length) return;
-            setRegisterItems(mergeRegisterLists(registerItems, localRows));
-            if (typeof refreshRegisterViews === 'function') refreshRegisterViews();
-        });
-    });
 }
 
 async function markRegisterFound(assetNumber, itemId, extra = {}) {
@@ -1956,13 +2045,29 @@ function updateRegisterList(options = {}) {
     syncRegisterSentinel();
 }
 
+function isTabActive(tabId) {
+    return !!document.getElementById(tabId)?.classList.contains('active');
+}
+
+function scheduleRefreshRegisterViews(delay = 120) {
+    clearTimeout(refreshRegisterViewsTimer);
+    refreshRegisterViewsTimer = setTimeout(() => {
+        refreshRegisterViewsTimer = null;
+        refreshRegisterViews();
+    }, delay);
+}
+
 function refreshRegisterViews() {
     const surveyedIndex = buildSurveyedIndex();
-    updateRegisterDashboard(surveyedIndex);
-    updateRegisterList({ preserveWindow: true, surveyedIndex });
-    updateAssetCheckBanner();
-    if (typeof refreshUsefulLifeRegisterTab === 'function'
-        && document.getElementById('usefullife')?.classList.contains('active')) {
+    const showRegisterUi = isTabActive('register') || isTabActive('dashboard');
+    if (showRegisterUi) {
+        updateRegisterDashboard(surveyedIndex);
+        updateRegisterList({ preserveWindow: true, surveyedIndex });
+    }
+    if (isTabActive('input') || document.getElementById('assetNumber')?.value) {
+        updateAssetCheckBanner({ allowAutofill: false });
+    }
+    if (typeof refreshUsefulLifeRegisterTab === 'function' && isTabActive('usefullife')) {
         refreshUsefulLifeRegisterTab();
     }
 }
@@ -2135,19 +2240,30 @@ function initRegister() {
         });
     }
 
+    document.getElementById('surveySelect')?.addEventListener('change', () => {
+        setTimeout(() => listenRegisterChunks(), 0);
+    });
+
     listenRegisterChunks();
     idbReadRegisters().then((localRows) => {
         if (!localRows.length) return;
-        setRegisterItems(mergeRegisterLists(registerItems, localRows));
-        refreshRegisterViews();
+        const sid = getRegisterSurveyId();
+        const scoped = sid ? localRows.filter((row) => row.surveyId === sid) : localRows;
+        if (!scoped.length) return;
+        if (sid) replaceRegisterSurveyRows(sid, scoped);
+        else setRegisterItems(mergeRegisterLists(registerItems, scoped));
+        scheduleRefreshRegisterViews();
     });
-    refreshRegisterViews();
+    scheduleRefreshRegisterViews(0);
 }
 
 window.setRegisterItems = setRegisterItems;
 window.mergeRegisterLists = mergeRegisterLists;
 window.idbReadRegisters = idbReadRegisters;
 window.refreshRegisterViews = refreshRegisterViews;
+window.scheduleRefreshRegisterViews = scheduleRefreshRegisterViews;
+window.listenRegisterChunks = listenRegisterChunks;
+window.invalidateAssetSearchIndex = invalidateAssetSearchIndex;
 window.confirmAssetDuplicate = confirmAssetDuplicate;
 window.markRegisterFound = markRegisterFound;
 window.fillFromRegister = fillFromRegister;

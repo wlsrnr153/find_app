@@ -2,6 +2,7 @@
 let baselineItems = window.baselineItems || [];
 let activeBaselineRecord = null;
 let unsubscribeBaselineChunks = null;
+let baselineChunkSurveyId = '';
 
 const BASELINE_COMPARE_FIELDS = [
     { key: 'holder', label: '사용자', formId: 'holder' },
@@ -19,7 +20,22 @@ const BASELINE_COMPARE_FIELDS = [
 function setBaselineItems(list) {
     baselineItems = Array.isArray(list) ? list : [];
     window.baselineItems = baselineItems;
+    if (typeof invalidateAssetSearchIndex === 'function') invalidateAssetSearchIndex();
     updateBaselineStatusUi();
+}
+
+function replaceBaselineSurveyRows(surveyId, chunkRows) {
+    if (!surveyId) return;
+    const chunkById = new Map();
+    (chunkRows || []).forEach((record) => {
+        if (record?.id) chunkById.set(record.id, { ...record, _fromChunk: true });
+    });
+    const kept = baselineItems.filter((record) => {
+        if (record.surveyId !== surveyId) return true;
+        if (record._fromChunk) return false;
+        return !chunkById.has(record.id);
+    });
+    setBaselineItems(kept.concat(Array.from(chunkById.values())));
 }
 
 function getBaselineSurveyId() {
@@ -242,25 +258,48 @@ function mergeBaselineLists(...lists) {
     return Array.from(byId.values());
 }
 
-function listenBaselineChunks() {
-    if (unsubscribeBaselineChunks) return;
-    unsubscribeBaselineChunks = db.collection('baselineChunks').onSnapshot((snapshot) => {
-        const chunkRows = [];
-        snapshot.docs.forEach((doc) => {
-            (doc.data()?.rows || []).forEach((record) => {
-                if (record && record.id) chunkRows.push(record);
+function stopBaselineChunkListener() {
+    if (unsubscribeBaselineChunks) {
+        unsubscribeBaselineChunks();
+        unsubscribeBaselineChunks = null;
+    }
+    baselineChunkSurveyId = '';
+}
+
+function listenBaselineChunks(forceSurveyId) {
+    const surveyId = forceSurveyId || getBaselineSurveyId();
+    if (!surveyId) {
+        stopBaselineChunkListener();
+        return;
+    }
+    if (unsubscribeBaselineChunks && baselineChunkSurveyId === surveyId) return;
+
+    stopBaselineChunkListener();
+    baselineChunkSurveyId = surveyId;
+
+    const trimmed = baselineItems.filter((record) => record.surveyId === surveyId || !record._fromChunk);
+    if (trimmed.length !== baselineItems.length) setBaselineItems(trimmed);
+
+    unsubscribeBaselineChunks = db.collection('baselineChunks')
+        .where('surveyId', '==', surveyId)
+        .onSnapshot((snapshot) => {
+            const byId = new Map();
+            snapshot.docs.forEach((doc) => {
+                (doc.data()?.rows || []).forEach((record) => {
+                    if (record?.id) byId.set(record.id, record);
+                });
+            });
+            replaceBaselineSurveyRows(surveyId, Array.from(byId.values()));
+        }, (error) => {
+            console.warn('기준 대장 구독 실패:', error);
+            stopBaselineChunkListener();
+            idbReadBaselines().then((localRows) => {
+                if (!localRows.length) return;
+                const scoped = localRows.filter((row) => row.surveyId === surveyId);
+                if (!scoped.length) return;
+                replaceBaselineSurveyRows(surveyId, scoped);
             });
         });
-        const existing = baselineItems.filter((record) => !chunkRows.some((row) => row.id === record.id));
-        setBaselineItems(mergeBaselineLists(existing, chunkRows));
-    }, (error) => {
-        console.warn('기준 대장 구독 실패:', error);
-        unsubscribeBaselineChunks = null;
-        idbReadBaselines().then((localRows) => {
-            if (!localRows.length) return;
-            setBaselineItems(mergeBaselineLists(baselineItems, localRows));
-        });
-    });
 }
 
 function clearBaselineComparePanel() {
@@ -416,20 +455,23 @@ function initBaselineRegister() {
         });
     }
 
+    document.getElementById('surveySelect')?.addEventListener('change', () => {
+        setTimeout(() => {
+            listenBaselineChunks();
+            updateBaselineStatusUi();
+        }, 0);
+    });
+
     listenBaselineChunks();
     idbReadBaselines().then((localRows) => {
         if (!localRows.length) return;
-        setBaselineItems(mergeBaselineLists(baselineItems, localRows));
+        const sid = getBaselineSurveyId();
+        const scoped = sid ? localRows.filter((row) => row.surveyId === sid) : localRows;
+        if (!scoped.length) return;
+        if (sid) replaceBaselineSurveyRows(sid, scoped);
+        else setBaselineItems(mergeBaselineLists(baselineItems, scoped));
     });
     updateBaselineStatusUi();
-
-    if (typeof window !== 'undefined') {
-        const originalSelect = window.selectSurvey;
-        // selectSurvey는 masters에 있음 — 상태 갱신만 훅
-        document.getElementById('surveySelect')?.addEventListener('change', () => {
-            setTimeout(updateBaselineStatusUi, 0);
-        });
-    }
 }
 
 window.setBaselineItems = setBaselineItems;
@@ -445,4 +487,5 @@ window.collectBaselineFormChanges = collectBaselineFormChanges;
 window.applyBaselineSurveyResult = applyBaselineSurveyResult;
 window.initBaselineRegister = initBaselineRegister;
 window.updateBaselineStatusUi = updateBaselineStatusUi;
+window.listenBaselineChunks = listenBaselineChunks;
 window.activeBaselineRecordRef = () => activeBaselineRecord;
