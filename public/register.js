@@ -8,6 +8,8 @@ let scanZoom = 1;
 let scanEnhanceTimers = [];
 let scanCameraList = [];
 let scanCameraIndex = 0;
+/** 'environment' = 후면, 'user' = 전면 — deviceId보다 facingMode가 기기 호환성이 높음 */
+let scanFacingMode = 'environment';
 let scanSwitching = false;
 let pendingAssetOverride = false;
 let unsubscribeRegisterChunks = null;
@@ -2231,6 +2233,30 @@ function scheduleScanEnhance(delayMs, preferredZoom) {
     scanEnhanceTimers.push(id);
 }
 
+/** iPhone/iPad — Safari·Chrome 모두 WebKit라 웹 초점 API가 약함 */
+function isAppleMobileBrowser() {
+    const ua = navigator.userAgent || '';
+    const iOS = /iPad|iPhone|iPod/.test(ua);
+    const iPadOS = navigator.platform === 'MacIntel' && Number(navigator.maxTouchPoints || 0) > 1;
+    return iOS || iPadOS;
+}
+
+function updateScanHelpForPlatform() {
+    const help = document.getElementById('scanHelp');
+    const hint = document.getElementById('scanPhotoHint');
+    if (isAppleMobileBrowser()) {
+        if (help) {
+            help.innerHTML = '코드를 프레임 안에 맞추세요. Safari는 라이브 초점이 약할 수 있으니, 흐리면 <strong>사진으로 스캔</strong>을 쓰세요. 약 15~25cm가 잘 잡힙니다.';
+        }
+        if (hint) hint.classList.add('is-emphasis');
+    } else {
+        if (help) {
+            help.innerHTML = '코드를 프레임 안에 맞추세요. 흐리면 <strong>확대</strong>하거나 <strong>플래시·초점</strong>을 눌러 보세요. 약 15~25cm가 잘 잡힙니다.';
+        }
+        if (hint) hint.classList.remove('is-emphasis');
+    }
+}
+
 function getScanTrackCapabilities() {
     try {
         return html5Scanner?.getRunningTrackCapabilities?.() || {};
@@ -2260,11 +2286,24 @@ function isScanFrontCamera(cam) {
     return /front|user|전면|selfie|face/i.test(String(cam?.label || ''));
 }
 
-function describeScanCamera(cam) {
-    if (!cam) return '카메라';
-    if (isScanFrontCamera(cam)) return '전면';
-    if (/back|rear|environment|후면|후방|world/i.test(String(cam.label || ''))) return '후면';
-    return cam.label ? String(cam.label).slice(0, 18) : '카메라';
+function isScanBackCamera(cam) {
+    return /back|rear|environment|후면|후방|world/i.test(String(cam?.label || ''));
+}
+
+function describeFacingMode(mode) {
+    return mode === 'user' ? '전면' : '후면';
+}
+
+function syncScanFacingFromTrack() {
+    const settings = getScanTrackSettings();
+    if (settings.facingMode === 'user' || settings.facingMode === 'environment') {
+        scanFacingMode = settings.facingMode;
+        return;
+    }
+    // facingMode를 안 주는 기기는 라벨로 추정
+    const label = String(settings.label || settings.deviceId || '');
+    if (/front|user|전면|selfie|face/i.test(label)) scanFacingMode = 'user';
+    else if (/back|rear|environment|후면|후방/i.test(label)) scanFacingMode = 'environment';
 }
 
 function updateScanControlUi(caps = getScanTrackCapabilities()) {
@@ -2287,57 +2326,71 @@ function updateScanControlUi(caps = getScanTrackCapabilities()) {
     if (zoomLabel) zoomLabel.textContent = `${Number(scanZoom || 1).toFixed(1)}×`;
 
     if (switchBtn) {
-        const canSwitch = scanCameraList.length > 1;
-        switchBtn.hidden = !canSwitch;
-        if (canSwitch) {
-            const current = scanCameraList[scanCameraIndex];
-            const next = scanCameraList[(scanCameraIndex + 1) % scanCameraList.length];
-            switchBtn.textContent = `카메라 전환 (${describeScanCamera(current)}→${describeScanCamera(next)})`;
-        }
+        // facingMode 전환은 카메라 목록 개수와 무관하게 항상 제공
+        switchBtn.hidden = false;
+        const next = scanFacingMode === 'environment' ? 'user' : 'environment';
+        switchBtn.textContent = `${describeFacingMode(next)} 카메라로 전환`;
+        switchBtn.title = `현재: ${describeFacingMode(scanFacingMode)}`;
     }
 }
 
-function scoreScanCamera(cam, index) {
-    const label = String(cam.label || '').toLowerCase();
-    let score = index;
-    if (/ultra\s*wide|초광각|0\.5/.test(label)) score -= 40;
-    if (/tele|망원|zoom/.test(label)) score -= 10;
-    if (/back|rear|environment|후면|후방|world/.test(label)) score += 30;
-    if (/front|user|전면|selfie|face/.test(label)) score -= 50;
-    return score;
+async function ensureCameraPermission() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('getUserMedia unsupported');
+    }
+    // 권한 허용 후 enumerateDevices 라벨이 채워지도록 짧게 워밍업
+    let stream = null;
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: { ideal: 'environment' } }
+        });
+    } catch (_) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+    }
+    stream.getTracks().forEach((track) => track.stop());
+    // 일부 Android는 트랙 해제 직후 재오픈 시 NotReadableError → 짧게 대기
+    await new Promise((resolve) => setTimeout(resolve, 200));
 }
 
 async function loadScanCameraList() {
     try {
         const cameras = await Html5Qrcode.getCameras();
         scanCameraList = Array.isArray(cameras) ? cameras.slice() : [];
-        if (!scanCameraList.length) {
-            scanCameraIndex = 0;
-            return null;
-        }
-        let best = 0;
-        let bestScore = -Infinity;
-        scanCameraList.forEach((cam, index) => {
-            const score = scoreScanCamera(cam, index);
-            if (score > bestScore) {
-                bestScore = score;
-                best = index;
-            }
-        });
-        scanCameraIndex = best;
-        return scanCameraList[scanCameraIndex].id;
     } catch (_) {
         scanCameraList = [];
-        scanCameraIndex = 0;
-        return null;
     }
+    return scanCameraList;
 }
 
-function resolveScanCameraConfig() {
-    if (scanCameraList.length && scanCameraList[scanCameraIndex]) {
-        return scanCameraList[scanCameraIndex].id;
+function pickDeviceIdForFacing(facing) {
+    if (!scanCameraList.length) return null;
+    const wantFront = facing === 'user';
+    const matched = scanCameraList.find((cam) => (
+        wantFront ? isScanFrontCamera(cam) : isScanBackCamera(cam)
+    ));
+    if (matched) return matched.id;
+    // 라벨이 비어 있으면 deviceId 추측은 위험 → facingMode에 맡김
+    const labeled = scanCameraList.some((cam) => String(cam.label || '').trim());
+    if (!labeled) return null;
+    if (wantFront) {
+        const frontish = scanCameraList.find((cam) => isScanFrontCamera(cam));
+        return frontish?.id || null;
     }
-    return { facingMode: { ideal: 'environment' } };
+    const nonFront = scanCameraList.find((cam) => !isScanFrontCamera(cam));
+    return nonFront?.id || null;
+}
+
+function buildFacingConfigs(facing) {
+    // exact → plain → ideal 순. Android/iOS 호환을 위해 deviceId는 최후 수단
+    const configs = [
+        { facingMode: { exact: facing } },
+        { facingMode: facing },
+        { facingMode: { ideal: facing } }
+    ];
+    const deviceId = pickDeviceIdForFacing(facing);
+    if (deviceId) configs.push(deviceId);
+    return configs;
 }
 
 function buildScanQrbox(viewfinderWidth, viewfinderHeight) {
@@ -2362,11 +2415,13 @@ async function enhanceScanCamera(preferredZoom) {
     const caps = getScanTrackCapabilities();
     const advanced = [];
     const constraints = {};
+    const apple = isAppleMobileBrowser();
 
     const focusModes = caps.focusMode;
     const supportsContinuous = Array.isArray(focusModes)
         ? focusModes.includes('continuous')
-        : focusModes == null || focusModes === 'continuous';
+        : false;
+    // iOS는 focusMode를 capability에 올려도 무시하는 경우가 많아, 지원 확인된 경우만 요청
     if (supportsContinuous) {
         constraints.focusMode = 'continuous';
         advanced.push({ focusMode: 'continuous' });
@@ -2375,7 +2430,12 @@ async function enhanceScanCamera(preferredZoom) {
     if (caps.zoom) {
         const min = Number(caps.zoom.min) || 1;
         const max = Number(caps.zoom.max) || 1;
-        const target = Math.min(max, Math.max(min, preferredZoom != null ? preferredZoom : Math.min(max, Math.max(min, 1.7))));
+        // iOS 17+ 줌이 되면 조금 더 당겨 바코드 모듈을 키운다 (AF 대체에 가깝다)
+        const fallbackZoom = apple ? 2.0 : 1.7;
+        const target = Math.min(
+            max,
+            Math.max(min, preferredZoom != null ? preferredZoom : Math.min(max, Math.max(min, fallbackZoom)))
+        );
         scanZoom = target;
         constraints.zoom = target;
         advanced.push({ zoom: target });
@@ -2429,17 +2489,67 @@ async function nudgeScanZoom(direction) {
 
 async function refocusScanCamera() {
     if (!html5Scanner) return;
-    showToast('초점을 다시 맞추는 중…', 'info');
-    // 연속 초점을 재요청하고, 지원 시 살짝 줌을 흔들어 재포커스를 유도
-    await enhanceScanCamera(scanZoom);
     const caps = getScanTrackCapabilities();
-    if (isScanZoomSupported(caps)) {
+    const apple = isAppleMobileBrowser();
+    const canZoom = isScanZoomSupported(caps);
+    const canFocus = Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous');
+
+    if (apple && !canZoom && !canFocus) {
+        showToast('이 iPhone에서는 웹 초점을 조절할 수 없습니다. 사진으로 스캔해 보세요.', 'info');
+        document.getElementById('scanPhotoBtn')?.focus();
+        return;
+    }
+
+    showToast('초점을 다시 맞추는 중…', 'info');
+    await enhanceScanCamera(scanZoom);
+    if (canZoom) {
         const min = Number(caps.zoom.min) || 1;
         const max = Number(caps.zoom.max) || 1;
-        const bump = Math.min(max, scanZoom + 0.15);
+        const bump = Math.min(max, scanZoom + (apple ? 0.35 : 0.15));
         await applyScanConstraints({ advanced: [{ zoom: bump }] });
-        await new Promise((r) => setTimeout(r, 180));
+        await new Promise((r) => setTimeout(r, apple ? 280 : 180));
         await applyScanConstraints({ advanced: [{ zoom: Math.min(max, Math.max(min, scanZoom)) }] });
+    }
+}
+
+function openScanPhotoPicker() {
+    const input = document.getElementById('scanPhotoInput');
+    if (!input) return;
+    input.value = '';
+    input.click();
+}
+
+async function scanBarcodeFromPhotoFile(file) {
+    if (!file || typeof Html5Qrcode === 'undefined') return;
+    showToast('사진에서 코드 인식 중…', 'info');
+
+    const tempId = 'qrReaderFileTemp';
+    let temp = document.getElementById(tempId);
+    if (!temp) {
+        temp = document.createElement('div');
+        temp.id = tempId;
+        temp.hidden = true;
+        temp.style.cssText = 'position:absolute;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;';
+        document.body.appendChild(temp);
+    }
+
+    const reader = new Html5Qrcode(tempId, {
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+        verbose: false
+    });
+
+    try {
+        // 두 번째 인자 true = 화면에도 그림(숨김 영역). 이미지 디코드
+        const text = await reader.scanFile(file, /* showImage= */ true);
+        try { await reader.clear(); } catch (_) {}
+        const value = String(text || '').trim();
+        if (!value) throw new Error('empty decode');
+        applyScannedAsset(value);
+        await stopAssetScan();
+    } catch (error) {
+        console.warn('사진 바코드 인식 실패:', error);
+        try { await reader.clear(); } catch (_) {}
+        showToast('사진에서 바코드/QR을 찾지 못했습니다. 코드를 크게·밝게 다시 찍어 보세요.', 'error');
     }
 }
 
@@ -2449,6 +2559,8 @@ function bindScanControlButtons() {
     const zoomOut = document.getElementById('scanZoomOutBtn');
     const refocus = document.getElementById('scanRefocusBtn');
     const switchBtn = document.getElementById('scanSwitchCameraBtn');
+    const photoBtn = document.getElementById('scanPhotoBtn');
+    const photoInput = document.getElementById('scanPhotoInput');
     if (torchBtn && !torchBtn.dataset.bound) {
         torchBtn.dataset.bound = 'true';
         torchBtn.addEventListener('click', () => setScanTorch(!scanTorchOn));
@@ -2468,6 +2580,18 @@ function bindScanControlButtons() {
     if (switchBtn && !switchBtn.dataset.bound) {
         switchBtn.dataset.bound = 'true';
         switchBtn.addEventListener('click', () => switchScanCamera());
+    }
+    if (photoBtn && !photoBtn.dataset.bound) {
+        photoBtn.dataset.bound = 'true';
+        photoBtn.addEventListener('click', openScanPhotoPicker);
+    }
+    if (photoInput && !photoInput.dataset.bound) {
+        photoInput.dataset.bound = 'true';
+        photoInput.addEventListener('change', (e) => {
+            const file = e.target.files?.[0];
+            if (file) scanBarcodeFromPhotoFile(file);
+            e.target.value = '';
+        });
     }
 }
 
@@ -2504,62 +2628,127 @@ async function startHtml5ScannerWithCamera(cameraConfig) {
         verbose: false
     });
 
-    const videoConstraints = {
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-        focusMode: 'continuous'
+    const apple = isAppleMobileBrowser();
+    const useFacing = !!(cameraConfig && typeof cameraConfig === 'object' && cameraConfig.facingMode);
+    const onSuccess = (text) => {
+        applyScannedAsset(text);
+        stopAssetScan();
     };
-    // deviceId와 facingMode를 같이 넣으면 일부 기기에서 카메라 오픈이 실패함
-    if (typeof cameraConfig !== 'string') {
-        Object.assign(videoConstraints, cameraConfig);
-    }
 
-    await html5Scanner.start(
-        cameraConfig,
-        {
-            fps: 12,
+    // iOS: facingMode+해상도를 videoConstraints에 넣고 첫 인자는 빈 객체가 인식률이 더 나은 경우가 많음
+    if (apple && useFacing) {
+        await html5Scanner.start(
+            {},
+            {
+                fps: 10,
+                qrbox: buildScanQrbox,
+                aspectRatio: 1.777778,
+                disableFlip: false,
+                experimentalFeatures: {
+                    useBarCodeDetectorIfSupported: true
+                },
+                videoConstraints: {
+                    facingMode: cameraConfig.facingMode,
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 }
+                },
+                formatsToSupport: getScanFormats()
+            },
+            onSuccess
+        );
+    } else {
+        const config = {
+            fps: apple ? 10 : 12,
             qrbox: buildScanQrbox,
             aspectRatio: 1.777778,
             disableFlip: false,
             experimentalFeatures: {
                 useBarCodeDetectorIfSupported: true
             },
-            videoConstraints,
             formatsToSupport: getScanFormats()
-        },
-        (text) => {
-            applyScannedAsset(text);
-            stopAssetScan();
+        };
+        if (!useFacing && typeof cameraConfig === 'string') {
+            config.videoConstraints = {
+                deviceId: { exact: cameraConfig },
+                width: { ideal: apple ? 1920 : 1280 },
+                height: { ideal: apple ? 1080 : 720 }
+            };
         }
-    );
+
+        await html5Scanner.start(cameraConfig, config, onSuccess);
+    }
 
     scanTorchOn = false;
     scanZoom = 1;
-    scheduleScanEnhance(350, 1.6);
-    scheduleScanEnhance(1200, 1.8);
+    syncScanFacingFromTrack();
+    if (apple) {
+        scheduleScanEnhance(900, 2.0);
+        scheduleScanEnhance(2200, 2.3);
+    } else {
+        scheduleScanEnhance(350, 1.6);
+        scheduleScanEnhance(1200, 1.8);
+    }
     updateScanControlUi();
 }
 
+async function startScannerWithFacing(facing) {
+    const preferred = facing === 'user' ? 'user' : 'environment';
+    scanFacingMode = preferred;
+    const attempts = buildFacingConfigs(preferred);
+    let lastError = null;
+
+    for (const config of attempts) {
+        try {
+            await stopHtml5ScannerInstance();
+            await startHtml5ScannerWithCamera(config);
+            syncScanFacingFromTrack();
+            return true;
+        } catch (error) {
+            lastError = error;
+            console.warn('카메라 시작 시도 실패:', config, error);
+            await stopHtml5ScannerInstance();
+        }
+    }
+
+    // 최후: 아무 카메라나
+    try {
+        await stopHtml5ScannerInstance();
+        await startHtml5ScannerWithCamera({ facingMode: preferred === 'user' ? 'user' : 'environment' });
+        syncScanFacingFromTrack();
+        return true;
+    } catch (error) {
+        lastError = error;
+    }
+    throw lastError || new Error('camera start failed');
+}
+
 async function switchScanCamera() {
-    if (scanSwitching || scanCameraList.length < 2) return;
+    if (scanSwitching) return;
     scanSwitching = true;
     const switchBtn = document.getElementById('scanSwitchCameraBtn');
     if (switchBtn) switchBtn.disabled = true;
+    const nextFacing = scanFacingMode === 'environment' ? 'user' : 'environment';
     try {
         clearScanEnhanceTimers();
-        scanCameraIndex = (scanCameraIndex + 1) % scanCameraList.length;
-        await stopHtml5ScannerInstance();
-        await startHtml5ScannerWithCamera(resolveScanCameraConfig());
-        showToast(`${describeScanCamera(scanCameraList[scanCameraIndex])} 카메라로 전환`, 'success');
+        await startScannerWithFacing(nextFacing);
+        showToast(`${describeFacingMode(scanFacingMode)} 카메라로 전환`, 'success');
     } catch (error) {
         console.warn('카메라 전환 실패:', error);
-        showToast('카메라 전환에 실패했습니다', 'error');
+        const msg = String(error?.name || error?.message || error || '');
+        if (/NotAllowed|Permission/i.test(msg)) {
+            showToast('카메라 권한이 필요합니다. 브라우저/앱 설정에서 허용해 주세요.', 'error');
+        } else if (/NotReadable|TrackStart|AbortError/i.test(msg)) {
+            showToast('후면 카메라를 다른 앱이 사용 중이거나 기기에서 열 수 없습니다.', 'error');
+        } else {
+            showToast(`${describeFacingMode(nextFacing)} 카메라 전환에 실패했습니다`, 'error');
+        }
         try {
-            await startHtml5ScannerWithCamera(resolveScanCameraConfig());
+            await startScannerWithFacing(scanFacingMode === nextFacing ? 'environment' : scanFacingMode);
         } catch (_) {}
     } finally {
         scanSwitching = false;
         if (switchBtn) switchBtn.disabled = false;
+        updateScanControlUi();
     }
 }
 
@@ -2571,8 +2760,10 @@ async function startAssetScan() {
     document.body.style.overflow = 'hidden';
     scanTorchOn = false;
     scanZoom = 1;
+    scanFacingMode = 'environment';
     clearScanEnhanceTimers();
     bindScanControlButtons();
+    updateScanHelpForPlatform();
 
     const fallback = document.getElementById('scanFallback');
     if (fallback) fallback.style.display = 'none';
@@ -2586,12 +2777,26 @@ async function startAssetScan() {
 
     try {
         await stopHtml5ScannerInstance();
+        // 권한 자체는 전면만 막히는 경우가 거의 없음. 후면 실패는 보통 facingMode/deviceId 선택 문제
+        await ensureCameraPermission();
         await loadScanCameraList();
-        await startHtml5ScannerWithCamera(resolveScanCameraConfig());
+        await startScannerWithFacing('environment');
+        if (scanFacingMode === 'user') {
+            showToast('후면 대신 전면이 열렸습니다. "후면 카메라로 전환"을 눌러 보세요.', 'info');
+        } else if (isAppleMobileBrowser()) {
+            showToast('흐리면 「사진으로 스캔」을 사용하세요', 'info');
+        }
     } catch (error) {
         console.warn('카메라 스캔 시작 실패:', error);
+        const msg = String(error?.name || error?.message || error || '');
         if (fallback) fallback.style.display = 'block';
-        showToast('카메라를 열 수 없습니다. 자산번호를 직접 입력하세요.', 'error');
+        if (/NotAllowed|Permission/i.test(msg)) {
+            showToast('카메라 권한이 거부되었습니다. 브라우저 설정에서 허용해 주세요.', 'error');
+        } else if (isAppleMobileBrowser()) {
+            showToast('라이브 카메라를 열 수 없습니다. 사진으로 스캔해 보세요.', 'error');
+        } else {
+            showToast('카메라를 열 수 없습니다. 자산번호를 직접 입력하세요.', 'error');
+        }
     }
 }
 

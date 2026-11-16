@@ -777,6 +777,37 @@ body.dark-mode .survey-input-banner.is-closed {
     color: #111;
 }
 
+.scan-photo-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.scan-photo-actions .btn {
+    flex: 1;
+}
+
+.scan-photo-hint {
+    margin: 8px 0 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+
+.scan-photo-hint.is-emphasis {
+    color: #9a3412;
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
+body.dark-mode .scan-photo-hint.is-emphasis {
+    color: #fdba74;
+    background: rgba(154, 52, 18, 0.2);
+    border-color: rgba(253, 186, 116, 0.35);
+}
+
 .modal-wide {
     max-width: 760px;
 }
