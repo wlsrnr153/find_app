@@ -841,13 +841,23 @@
     </div>
 
     <div id="scanModal" class="modal">
-        <div class="modal-content modal-small">
+        <div class="modal-content modal-small scan-modal">
             <div class="modal-header">
                 <h2>자산번호 스캔</h2>
                 <button class="close-btn" id="closeScanModal">&times;</button>
             </div>
             <div class="modal-body">
+                <p class="scan-help">코드를 프레임 안에 맞추세요. 흐리면 <strong>확대</strong>하거나 <strong>플래시·초점</strong>을 눌러 보세요. 약 15~25cm가 잘 잡힙니다.</p>
                 <div id="qrReader" class="qr-reader"></div>
+                <div id="scanControls" class="scan-controls" hidden>
+                    <button type="button" id="scanTorchBtn" class="btn btn-secondary btn-small" hidden>플래시</button>
+                    <button type="button" id="scanRefocusBtn" class="btn btn-secondary btn-small">초점</button>
+                    <div class="scan-zoom-group" id="scanZoomGroup" hidden>
+                        <button type="button" id="scanZoomOutBtn" class="btn btn-secondary btn-small" aria-label="축소">−</button>
+                        <span id="scanZoomLabel" class="scan-zoom-label">1.0×</span>
+                        <button type="button" id="scanZoomInBtn" class="btn btn-secondary btn-small" aria-label="확대">+</button>
+                    </div>
+                </div>
                 <p id="scanFallback" class="register-empty" style="display: none;">
                     이 브라우저는 카메라 스캔을 지원하지 않습니다. 자산번호를 직접 입력하세요.
                 </p>

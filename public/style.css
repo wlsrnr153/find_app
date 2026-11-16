@@ -723,10 +723,58 @@ body.dark-mode .survey-input-banner.is-closed {
 
 .qr-reader {
     width: 100%;
-    min-height: 240px;
+    min-height: 280px;
     background: #111;
     border-radius: 8px;
     overflow: hidden;
+}
+
+.scan-modal .modal-body {
+    padding-top: 12px;
+}
+
+.scan-help {
+    margin: 0 0 10px;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+
+.scan-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.scan-controls[hidden] {
+    display: none !important;
+}
+
+.scan-zoom-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.scan-zoom-group[hidden] {
+    display: none !important;
+}
+
+.scan-zoom-label {
+    min-width: 3.2em;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+#scanTorchBtn[aria-pressed="true"] {
+    background: #f59e0b;
+    border-color: #d97706;
+    color: #111;
 }
 
 .modal-wide {

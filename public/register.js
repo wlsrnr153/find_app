@@ -3,6 +3,9 @@ let registerItems = window.registerItems || [];
 let registerFilter = 'all';
 let assetCheckTimer = null;
 let html5Scanner = null;
+let scanTorchOn = false;
+let scanZoom = 1;
+let scanEnhanceTimers = [];
 let pendingAssetOverride = false;
 let unsubscribeRegisterChunks = null;
 let registerChunkSurveyId = '';
@@ -2170,42 +2173,290 @@ function refreshRegisterViews() {
     }
 }
 
+function clearScanEnhanceTimers() {
+    scanEnhanceTimers.forEach((id) => clearTimeout(id));
+    scanEnhanceTimers = [];
+}
+
+function scheduleScanEnhance(delayMs, preferredZoom) {
+    const id = setTimeout(() => {
+        enhanceScanCamera(preferredZoom).catch(() => {});
+    }, delayMs);
+    scanEnhanceTimers.push(id);
+}
+
+function getScanTrackCapabilities() {
+    try {
+        return html5Scanner?.getRunningTrackCapabilities?.() || {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function getScanTrackSettings() {
+    try {
+        return html5Scanner?.getRunningTrackSettings?.() || {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function isScanTorchSupported(caps = getScanTrackCapabilities(), settings = getScanTrackSettings()) {
+    return caps.torch === true || Object.prototype.hasOwnProperty.call(caps, 'torch')
+        || Object.prototype.hasOwnProperty.call(settings, 'torch');
+}
+
+function isScanZoomSupported(caps = getScanTrackCapabilities()) {
+    return !!(caps.zoom && Number(caps.zoom.max) > Number(caps.zoom.min));
+}
+
+function updateScanControlUi(caps = getScanTrackCapabilities()) {
+    const controls = document.getElementById('scanControls');
+    const torchBtn = document.getElementById('scanTorchBtn');
+    const zoomGroup = document.getElementById('scanZoomGroup');
+    const zoomLabel = document.getElementById('scanZoomLabel');
+    if (controls) controls.hidden = false;
+
+    const torchOk = isScanTorchSupported(caps);
+    if (torchBtn) {
+        torchBtn.hidden = !torchOk;
+        torchBtn.setAttribute('aria-pressed', scanTorchOn ? 'true' : 'false');
+        torchBtn.textContent = scanTorchOn ? '플래시 끄기' : '플래시';
+    }
+
+    const zoomOk = isScanZoomSupported(caps);
+    if (zoomGroup) zoomGroup.hidden = !zoomOk;
+    if (zoomLabel) zoomLabel.textContent = `${Number(scanZoom || 1).toFixed(1)}×`;
+}
+
+async function resolveScanCamera() {
+    try {
+        const cameras = await Html5Qrcode.getCameras();
+        if (!cameras?.length) return { facingMode: { ideal: 'environment' } };
+        const scored = cameras.map((cam, index) => {
+            const label = String(cam.label || '').toLowerCase();
+            let score = index;
+            if (/ultra\s*wide|초광각|0\.5/.test(label)) score -= 40;
+            if (/tele|망원|zoom/.test(label)) score -= 10;
+            if (/back|rear|environment|후면|후방|world/.test(label)) score += 30;
+            if (/front|user|전면|selfie/.test(label)) score -= 50;
+            return { cam, score };
+        });
+        scored.sort((a, b) => b.score - a.score);
+        return scored[0].cam.id;
+    } catch (_) {
+        return { facingMode: { ideal: 'environment' } };
+    }
+}
+
+function buildScanQrbox(viewfinderWidth, viewfinderHeight) {
+    // 1D 바코드는 가로로 넓은 프레임이 인식에 유리
+    const width = Math.max(220, Math.min(Math.floor(viewfinderWidth * 0.9), 360));
+    const height = Math.max(100, Math.min(Math.floor(viewfinderHeight * 0.34), 160));
+    return { width, height };
+}
+
+async function applyScanConstraints(partial) {
+    if (!html5Scanner?.applyVideoConstraints) return false;
+    try {
+        await html5Scanner.applyVideoConstraints(partial);
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+async function enhanceScanCamera(preferredZoom) {
+    if (!html5Scanner) return;
+    const caps = getScanTrackCapabilities();
+    const advanced = [];
+    const constraints = {};
+
+    const focusModes = caps.focusMode;
+    const supportsContinuous = Array.isArray(focusModes)
+        ? focusModes.includes('continuous')
+        : focusModes == null || focusModes === 'continuous';
+    if (supportsContinuous) {
+        constraints.focusMode = 'continuous';
+        advanced.push({ focusMode: 'continuous' });
+    }
+
+    if (caps.zoom) {
+        const min = Number(caps.zoom.min) || 1;
+        const max = Number(caps.zoom.max) || 1;
+        const target = Math.min(max, Math.max(min, preferredZoom != null ? preferredZoom : Math.min(max, Math.max(min, 1.7))));
+        scanZoom = target;
+        constraints.zoom = target;
+        advanced.push({ zoom: target });
+    }
+
+    if (advanced.length) constraints.advanced = advanced;
+    if (!(await applyScanConstraints(constraints)) && advanced.length) {
+        await applyScanConstraints({ advanced });
+    }
+
+    // 일부 Android는 advanced만, 일부는 top-level만 받음
+    if (constraints.focusMode) {
+        await applyScanConstraints({ focusMode: 'continuous' });
+    }
+    if (constraints.zoom != null) {
+        await applyScanConstraints({ zoom: constraints.zoom });
+    }
+
+    updateScanControlUi(getScanTrackCapabilities());
+}
+
+async function setScanTorch(on) {
+    if (!html5Scanner) return;
+    const ok = (await applyScanConstraints({ advanced: [{ torch: !!on }] }))
+        || (await applyScanConstraints({ torch: !!on }));
+    if (!ok) {
+        showToast('이 기기에서는 플래시를 사용할 수 없습니다', 'info');
+        return;
+    }
+    scanTorchOn = !!on;
+    updateScanControlUi();
+}
+
+async function nudgeScanZoom(direction) {
+    if (!html5Scanner) return;
+    const caps = getScanTrackCapabilities();
+    if (!isScanZoomSupported(caps)) {
+        showToast('이 기기에서는 줌을 조절할 수 없습니다', 'info');
+        return;
+    }
+    const min = Number(caps.zoom.min) || 1;
+    const max = Number(caps.zoom.max) || 1;
+    const step = Math.max(Number(caps.zoom.step) || 0.2, 0.15);
+    const next = Math.min(max, Math.max(min, scanZoom + (direction * step * 2)));
+    const ok = (await applyScanConstraints({ advanced: [{ zoom: next }] }))
+        || (await applyScanConstraints({ zoom: next }));
+    if (!ok) return;
+    scanZoom = next;
+    updateScanControlUi(caps);
+}
+
+async function refocusScanCamera() {
+    if (!html5Scanner) return;
+    showToast('초점을 다시 맞추는 중…', 'info');
+    // 연속 초점을 재요청하고, 지원 시 살짝 줌을 흔들어 재포커스를 유도
+    await enhanceScanCamera(scanZoom);
+    const caps = getScanTrackCapabilities();
+    if (isScanZoomSupported(caps)) {
+        const min = Number(caps.zoom.min) || 1;
+        const max = Number(caps.zoom.max) || 1;
+        const bump = Math.min(max, scanZoom + 0.15);
+        await applyScanConstraints({ advanced: [{ zoom: bump }] });
+        await new Promise((r) => setTimeout(r, 180));
+        await applyScanConstraints({ advanced: [{ zoom: Math.min(max, Math.max(min, scanZoom)) }] });
+    }
+}
+
+function bindScanControlButtons() {
+    const torchBtn = document.getElementById('scanTorchBtn');
+    const zoomIn = document.getElementById('scanZoomInBtn');
+    const zoomOut = document.getElementById('scanZoomOutBtn');
+    const refocus = document.getElementById('scanRefocusBtn');
+    if (torchBtn && !torchBtn.dataset.bound) {
+        torchBtn.dataset.bound = 'true';
+        torchBtn.addEventListener('click', () => setScanTorch(!scanTorchOn));
+    }
+    if (zoomIn && !zoomIn.dataset.bound) {
+        zoomIn.dataset.bound = 'true';
+        zoomIn.addEventListener('click', () => nudgeScanZoom(1));
+    }
+    if (zoomOut && !zoomOut.dataset.bound) {
+        zoomOut.dataset.bound = 'true';
+        zoomOut.addEventListener('click', () => nudgeScanZoom(-1));
+    }
+    if (refocus && !refocus.dataset.bound) {
+        refocus.dataset.bound = 'true';
+        refocus.addEventListener('click', () => refocusScanCamera());
+    }
+}
+
 async function startAssetScan() {
     const modal = document.getElementById('scanModal');
     const reader = document.getElementById('qrReader');
     if (!modal || !reader) return;
     modal.classList.add('show');
     document.body.style.overflow = 'hidden';
+    scanTorchOn = false;
+    scanZoom = 1;
+    clearScanEnhanceTimers();
+    bindScanControlButtons();
+
+    const fallback = document.getElementById('scanFallback');
+    if (fallback) fallback.style.display = 'none';
+    const controls = document.getElementById('scanControls');
+    if (controls) controls.hidden = true;
 
     if (typeof Html5Qrcode === 'undefined') {
-        document.getElementById('scanFallback')?.style && (document.getElementById('scanFallback').style.display = 'block');
+        if (fallback) fallback.style.display = 'block';
         return;
     }
 
     try {
-        html5Scanner = new Html5Qrcode('qrReader');
+        if (html5Scanner) {
+            try { await html5Scanner.stop(); } catch (_) {}
+            try { html5Scanner.clear(); } catch (_) {}
+            html5Scanner = null;
+        }
+
+        html5Scanner = new Html5Qrcode('qrReader', {
+            experimentalFeatures: {
+                useBarCodeDetectorIfSupported: true
+            },
+            verbose: false
+        });
+
+        const cameraConfig = await resolveScanCamera();
+        const videoConstraints = {
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            focusMode: 'continuous'
+        };
+        // deviceId와 facingMode를 같이 넣으면 일부 기기에서 카메라 오픈이 실패함
+        if (typeof cameraConfig !== 'string') {
+            Object.assign(videoConstraints, cameraConfig);
+        }
+
+        const formats = [
+            Html5QrcodeSupportedFormats.QR_CODE,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.ITF
+        ];
+        if (Html5QrcodeSupportedFormats.CODABAR != null) formats.push(Html5QrcodeSupportedFormats.CODABAR);
+        if (Html5QrcodeSupportedFormats.DATA_MATRIX != null) formats.push(Html5QrcodeSupportedFormats.DATA_MATRIX);
+
         await html5Scanner.start(
-            { facingMode: 'environment' },
+            cameraConfig,
             {
-                fps: 10,
-                qrbox: { width: 230, height: 230 },
-                formatsToSupport: [
-                    Html5QrcodeSupportedFormats.QR_CODE,
-                    Html5QrcodeSupportedFormats.CODE_128,
-                    Html5QrcodeSupportedFormats.CODE_39,
-                    Html5QrcodeSupportedFormats.EAN_13,
-                    Html5QrcodeSupportedFormats.EAN_8,
-                    Html5QrcodeSupportedFormats.ITF
-                ]
+                fps: 12,
+                qrbox: buildScanQrbox,
+                aspectRatio: 1.777778,
+                disableFlip: false,
+                experimentalFeatures: {
+                    useBarCodeDetectorIfSupported: true
+                },
+                videoConstraints,
+                formatsToSupport: formats
             },
             (text) => {
                 applyScannedAsset(text);
                 stopAssetScan();
             }
         );
+
+        // 저가형 카메라는 시작 직후·안정화 후 연속초점·약줌을 두 번 적용
+        scheduleScanEnhance(350, 1.6);
+        scheduleScanEnhance(1200, 1.8);
+        updateScanControlUi();
     } catch (error) {
         console.warn('카메라 스캔 시작 실패:', error);
-        const fallback = document.getElementById('scanFallback');
         if (fallback) fallback.style.display = 'block';
         showToast('카메라를 열 수 없습니다. 자산번호를 직접 입력하세요.', 'error');
     }
@@ -2213,6 +2464,8 @@ async function startAssetScan() {
 
 async function stopAssetScan() {
     const modal = document.getElementById('scanModal');
+    clearScanEnhanceTimers();
+    scanTorchOn = false;
     if (html5Scanner) {
         try {
             await html5Scanner.stop();
@@ -2226,6 +2479,8 @@ async function stopAssetScan() {
         }
         html5Scanner = null;
     }
+    const controls = document.getElementById('scanControls');
+    if (controls) controls.hidden = true;
     if (modal) modal.classList.remove('show');
     document.body.style.overflow = 'auto';
 }
