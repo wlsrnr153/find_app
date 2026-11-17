@@ -6,6 +6,8 @@ let html5Scanner = null;
 let scanTorchOn = false;
 let scanZoom = 1;
 let scanEnhanceTimers = [];
+/** Android 등에서 AF가 잠기거나 흐린 채 유지될 때 주기적으로 재유도 */
+let scanFocusKeepAliveTimer = null;
 let scanCameraList = [];
 let scanCameraIndex = 0;
 /** 'environment' = 후면, 'user' = 전면 — deviceId보다 facingMode가 기기 호환성이 높음 */
@@ -913,7 +915,6 @@ function updateAssetCheckBanner(options = {}) {
     if (!banner || !input) return;
 
     const assetNumber = input.value.trim();
-    const allowAutofill = options.allowAutofill !== false;
     const wantFill = options.fillForm !== false;
     const forceFill = options.forceFill === true;
     pendingAssetOverride = false;
@@ -939,27 +940,23 @@ function updateAssetCheckBanner(options = {}) {
     const baselineCount = typeof getBaselineForSurvey === 'function' ? getBaselineForSurvey().length : 0;
     const hasExact = !!(baseline || register || existing);
 
-    // 완전 일치가 없으면 끝자리/부분일치 후보
+    // 완전 일치가 없으면 끝자리/부분일치 후보만 제시.
+    // 입력값을 대장 번호로 자동 덮어쓰지 않음 — 오타·번호 변경이 필요한 현장에서 직접 수정 가능해야 함.
     if (!hasExact) {
         if (typeof clearBaselineComparePanel === 'function') clearBaselineComparePanel();
         const candidates = collectAssetCandidates(assetNumber);
-        if (candidates.length === 1 && allowAutofill && candidates[0].type !== 'exact') {
-            input.value = candidates[0].assetNumber;
-            updateAssetCheckBanner({ allowAutofill: false, fillForm: wantFill, forceFill });
-            return;
-        }
         if (candidates.length > 1) {
             renderAssetMatchCandidates(candidates, assetNumber);
             banner.style.display = 'block';
             banner.classList.add('is-info');
-            banner.textContent = `부분 일치 ${candidates.length}건입니다. 아래에서 자산번호를 선택하세요.`;
+            banner.textContent = `부분 일치 ${candidates.length}건입니다. 맞으면 아래에서 선택하고, 다르면 입력값을 그대로 두세요.`;
             return;
         }
         if (candidates.length === 1) {
             renderAssetMatchCandidates(candidates, assetNumber);
             banner.style.display = 'block';
             banner.classList.add('is-info');
-            banner.textContent = '부분 일치 1건입니다. 선택하면 전체 자산번호로 채웁니다.';
+            banner.textContent = '부분 일치 1건입니다. 맞으면 아래에서 선택하고, 자산번호가 다르면 입력값을 수정하세요.';
             return;
         }
         clearAssetMatchCandidates();
@@ -2224,9 +2221,17 @@ function refreshRegisterViews() {
     }
 }
 
+function stopScanFocusKeepAlive() {
+    if (scanFocusKeepAliveTimer) {
+        clearInterval(scanFocusKeepAliveTimer);
+        scanFocusKeepAliveTimer = null;
+    }
+}
+
 function clearScanEnhanceTimers() {
     scanEnhanceTimers.forEach((id) => clearTimeout(id));
     scanEnhanceTimers = [];
+    stopScanFocusKeepAlive();
 }
 
 function scheduleScanEnhance(delayMs, preferredZoom) {
@@ -2234,6 +2239,54 @@ function scheduleScanEnhance(delayMs, preferredZoom) {
         enhanceScanCamera(preferredZoom).catch(() => {});
     }, delayMs);
     scanEnhanceTimers.push(id);
+}
+
+/** Chrome Android: 스트림 직후 getCapabilities()가 {}인 경우가 많아 짧게 재시도 */
+async function waitForScanCapabilities(maxWaitMs = 1400) {
+    const started = Date.now();
+    let caps = getScanTrackCapabilities();
+    while (Date.now() - started < maxWaitMs) {
+        if (caps && (
+            caps.focusMode
+            || caps.zoom
+            || Object.prototype.hasOwnProperty.call(caps, 'torch')
+            || Object.prototype.hasOwnProperty.call(caps, 'pointsOfInterest')
+            || Object.keys(caps).length > 2
+        )) {
+            return caps;
+        }
+        await delayScan(200);
+        caps = getScanTrackCapabilities();
+    }
+    return caps || {};
+}
+
+function getScanFocusModes(caps = getScanTrackCapabilities()) {
+    return Array.isArray(caps.focusMode) ? caps.focusMode : [];
+}
+
+function buildScanVideoConstraints(base = {}) {
+    const apple = isAppleMobileBrowser();
+    return {
+        ...base,
+        width: { ideal: apple ? 1920 : 1280 },
+        height: { ideal: apple ? 1080 : 720 },
+        // 미지원 UA는 무시. 시작 시부터 continuous를 요청하면 Samsung 등에서 흐림이 줄어드는 사례가 많음
+        focusMode: 'continuous'
+    };
+}
+
+function startScanFocusKeepAlive() {
+    stopScanFocusKeepAlive();
+    // iOS는 focusMode가 거의 안 먹고, 주기 적용만 배터리 소모
+    if (isAppleMobileBrowser()) return;
+    scanFocusKeepAliveTimer = setInterval(() => {
+        if (!html5Scanner) {
+            stopScanFocusKeepAlive();
+            return;
+        }
+        pulseScanAutofocus({ quiet: true }).catch(() => {});
+    }, 4500);
 }
 
 /** iPhone/iPad — Safari·Chrome 모두 WebKit라 웹 초점 API가 약함 */
@@ -2254,7 +2307,7 @@ function updateScanHelpForPlatform() {
         if (hint) hint.classList.add('is-emphasis');
     } else {
         if (help) {
-            help.innerHTML = '후면 카메라로 코드를 프레임 안에 맞추세요. 흐리면 <strong>확대</strong>·<strong>플래시</strong> 또는 <strong>사진으로 스캔</strong>. 약 15~25cm.';
+            help.innerHTML = '후면 카메라로 코드를 프레임 안에 맞추세요. 흐리면 <strong>초점</strong>·<strong>확대</strong>·<strong>플래시</strong> 또는 <strong>사진으로 스캔</strong>. 약 15~25cm.';
         }
         if (hint) hint.classList.remove('is-emphasis');
     }
@@ -2500,28 +2553,47 @@ async function applyScanConstraints(partial) {
     }
 }
 
-async function enhanceScanCamera(preferredZoom) {
+async function enhanceScanCamera(preferredZoom, options = {}) {
     if (!html5Scanner) return;
-    const caps = getScanTrackCapabilities();
+    const apple = isAppleMobileBrowser();
+    let caps = getScanTrackCapabilities();
+    // 스트림 직후 caps가 비어 continuous를 스킵하는 기기 보완
+    if (options.waitCaps !== false && Object.keys(caps).length < 2) {
+        caps = await waitForScanCapabilities(apple ? 900 : 1500);
+    }
+
     const advanced = [];
     const constraints = {};
-    const apple = isAppleMobileBrowser();
+    const focusModes = getScanFocusModes(caps);
+    const supportsContinuous = focusModes.includes('continuous');
+    const supportsSingle = focusModes.includes('single-shot');
+    // iOS: capability에 있어도 무시되는 경우가 많아 확인된 continuous만
+    // Android: caps가 비어 있어도 continuous 요청(삼성 등에서 유효한 사례)
+    const wantContinuous = supportsContinuous || (!apple && focusModes.length === 0);
 
-    const focusModes = caps.focusMode;
-    const supportsContinuous = Array.isArray(focusModes)
-        ? focusModes.includes('continuous')
-        : false;
-    // iOS는 focusMode를 capability에 올려도 무시하는 경우가 많아, 지원 확인된 경우만 요청
-    if (supportsContinuous) {
+    if (wantContinuous) {
         constraints.focusMode = 'continuous';
         advanced.push({ focusMode: 'continuous' });
+    } else if (supportsSingle) {
+        constraints.focusMode = 'single-shot';
+        advanced.push({ focusMode: 'single-shot' });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(caps, 'pointsOfInterest')) {
+        const settings = getScanTrackSettings();
+        const w = Number(settings.width) || 0;
+        const h = Number(settings.height) || 0;
+        const poi = (w > 0 && h > 0)
+            ? [{ x: w / 2, y: h / 2 }]
+            : [{ x: 0.5, y: 0.5 }];
+        advanced.push({ pointsOfInterest: poi });
     }
 
     if (caps.zoom) {
         const min = Number(caps.zoom.min) || 1;
         const max = Number(caps.zoom.max) || 1;
-        // iOS 17+ 줌이 되면 조금 더 당겨 바코드 모듈을 키운다 (AF 대체에 가깝다)
-        const fallbackZoom = apple ? 2.0 : 1.7;
+        // 디지털 줌으로 모듈을 키우면 AF가 약한 기기에서도 인식률이 나아짐
+        const fallbackZoom = apple ? 2.0 : 2.0;
         const target = Math.min(
             max,
             Math.max(min, preferredZoom != null ? preferredZoom : Math.min(max, Math.max(min, fallbackZoom)))
@@ -2538,10 +2610,69 @@ async function enhanceScanCamera(preferredZoom) {
 
     // 일부 Android는 advanced만, 일부는 top-level만 받음
     if (constraints.focusMode) {
-        await applyScanConstraints({ focusMode: 'continuous' });
+        await applyScanConstraints({ focusMode: constraints.focusMode });
+        await applyScanConstraints({ advanced: [{ focusMode: constraints.focusMode }] });
     }
     if (constraints.zoom != null) {
         await applyScanConstraints({ zoom: constraints.zoom });
+        await applyScanConstraints({ advanced: [{ zoom: constraints.zoom }] });
+    }
+
+    // continuous를 못 켠 기기: single-shot으로 한 번 스윕
+    if (!wantContinuous && supportsSingle) {
+        await pulseScanAutofocus({ quiet: true, zoomNudge: false });
+    }
+
+    updateScanControlUi(getScanTrackCapabilities());
+}
+
+/**
+ * AF 재유도: single-shot 펄스 → continuous 복귀 → (선택) 줌 살짝 올렸다 내림
+ */
+async function pulseScanAutofocus(options = {}) {
+    if (!html5Scanner) return;
+    const quiet = !!options.quiet;
+    const zoomNudge = options.zoomNudge !== false;
+    const apple = isAppleMobileBrowser();
+    let caps = getScanTrackCapabilities();
+    if (Object.keys(caps).length < 2) {
+        caps = await waitForScanCapabilities(apple ? 600 : 1000);
+    }
+    const focusModes = getScanFocusModes(caps);
+    const canSingle = focusModes.includes('single-shot');
+    const canContinuous = focusModes.includes('continuous') || (!apple && focusModes.length === 0);
+
+    if (!quiet) showToast('초점을 다시 맞추는 중…', 'info');
+
+    if (canSingle) {
+        (await applyScanConstraints({ advanced: [{ focusMode: 'single-shot' }] }))
+            || (await applyScanConstraints({ focusMode: 'single-shot' }));
+        await delayScan(apple ? 260 : 200);
+    }
+    if (canContinuous) {
+        (await applyScanConstraints({ advanced: [{ focusMode: 'continuous' }] }))
+            || (await applyScanConstraints({ focusMode: 'continuous' }));
+    }
+
+    if (Object.prototype.hasOwnProperty.call(caps, 'pointsOfInterest')) {
+        const settings = getScanTrackSettings();
+        const w = Number(settings.width) || 0;
+        const h = Number(settings.height) || 0;
+        const poi = (w > 0 && h > 0)
+            ? [{ x: w / 2, y: h / 2 }]
+            : [{ x: 0.5, y: 0.5 }];
+        await applyScanConstraints({ advanced: [{ pointsOfInterest: poi }] });
+    }
+
+    if (zoomNudge && isScanZoomSupported(caps)) {
+        const min = Number(caps.zoom.min) || 1;
+        const max = Number(caps.zoom.max) || 1;
+        const base = Math.min(max, Math.max(min, scanZoom));
+        const bump = Math.min(max, base + (apple ? 0.35 : 0.15));
+        await applyScanConstraints({ advanced: [{ zoom: bump }] });
+        await delayScan(apple ? 280 : 160);
+        await applyScanConstraints({ advanced: [{ zoom: base }] });
+        scanZoom = base;
     }
 
     updateScanControlUi(getScanTrackCapabilities());
@@ -2579,10 +2710,16 @@ async function nudgeScanZoom(direction) {
 
 async function refocusScanCamera() {
     if (!html5Scanner) return;
-    const caps = getScanTrackCapabilities();
     const apple = isAppleMobileBrowser();
+    let caps = getScanTrackCapabilities();
+    if (Object.keys(caps).length < 2) {
+        caps = await waitForScanCapabilities(apple ? 600 : 1000);
+    }
+    const focusModes = getScanFocusModes(caps);
     const canZoom = isScanZoomSupported(caps);
-    const canFocus = Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous');
+    const canFocus = focusModes.includes('continuous')
+        || focusModes.includes('single-shot')
+        || (!apple && focusModes.length === 0);
 
     if (apple && !canZoom && !canFocus) {
         showToast('이 iPhone에서는 웹 초점을 조절할 수 없습니다. 사진으로 스캔해 보세요.', 'info');
@@ -2590,16 +2727,8 @@ async function refocusScanCamera() {
         return;
     }
 
-    showToast('초점을 다시 맞추는 중…', 'info');
-    await enhanceScanCamera(scanZoom);
-    if (canZoom) {
-        const min = Number(caps.zoom.min) || 1;
-        const max = Number(caps.zoom.max) || 1;
-        const bump = Math.min(max, scanZoom + (apple ? 0.35 : 0.15));
-        await applyScanConstraints({ advanced: [{ zoom: bump }] });
-        await new Promise((r) => setTimeout(r, apple ? 280 : 180));
-        await applyScanConstraints({ advanced: [{ zoom: Math.min(max, Math.max(min, scanZoom)) }] });
-    }
+    await enhanceScanCamera(scanZoom, { waitCaps: false });
+    await pulseScanAutofocus({ quiet: false, zoomNudge: canZoom });
 }
 
 function openScanPhotoPicker() {
@@ -2749,17 +2878,16 @@ async function startHtml5ScannerWithCamera(cameraConfig) {
     const config = buildScannerStartConfig(apple);
 
     // html5-qrcode: videoConstraints가 있으면 cameraIdOrConfig를 무시한다.
-    // 그래서 해상도와 facingMode/deviceId를 반드시 같은 videoConstraints에 넣거나,
-    // videoConstraints 없이 첫 인자만 써야 한다.
+    // 해상도·focusMode·facingMode/deviceId를 같은 videoConstraints에 넣는다.
     if (typeof cameraConfig === 'string') {
-        config.videoConstraints = {
-            deviceId: { exact: cameraConfig },
-            width: { ideal: apple ? 1920 : 1280 },
-            height: { ideal: apple ? 1080 : 720 }
-        };
+        config.videoConstraints = buildScanVideoConstraints({
+            deviceId: { exact: cameraConfig }
+        });
         await html5Scanner.start(cameraConfig, config, onSuccess);
     } else if (useFacing) {
-        // facingMode만 첫 인자로 전달 (라이브러리 규격: string | { exact })
+        config.videoConstraints = buildScanVideoConstraints({
+            facingMode: cameraConfig.facingMode
+        });
         await html5Scanner.start(cameraConfig, config, onSuccess);
     } else {
         await html5Scanner.start(cameraConfig, config, onSuccess);
@@ -2769,11 +2897,18 @@ async function startHtml5ScannerWithCamera(cameraConfig) {
     scanZoom = 1;
     syncScanFacingFromTrack();
     if (apple) {
-        scheduleScanEnhance(900, 2.0);
-        scheduleScanEnhance(2200, 2.3);
+        scheduleScanEnhance(700, 2.0);
+        scheduleScanEnhance(1800, 2.3);
+        scheduleScanEnhance(3200, 2.3);
     } else {
-        scheduleScanEnhance(350, 1.6);
-        scheduleScanEnhance(1200, 1.8);
+        // 시작 직후 caps 지연 + continuous 재적용, 이후 keep-alive로 잠김 AF 완화
+        scheduleScanEnhance(400, 2.0);
+        scheduleScanEnhance(1200, 2.2);
+        scheduleScanEnhance(2600, 2.2);
+        const keepAliveId = setTimeout(() => {
+            startScanFocusKeepAlive();
+        }, 3000);
+        scanEnhanceTimers.push(keepAliveId);
     }
     updateScanControlUi();
 }
