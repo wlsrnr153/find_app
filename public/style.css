@@ -3066,6 +3066,64 @@ body.dark-mode .scan-photo-hint.is-emphasis {
     }
 }
 
+/* RFID tag photo OCR */
+.tag-ocr-status {
+    margin-top: 10px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.45;
+}
+.tag-ocr-panel {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--gray-200);
+}
+.tag-ocr-hint {
+    margin: 10px 0 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+.tag-ocr-scroll {
+    overflow: auto;
+    max-height: 360px;
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+}
+.tag-ocr-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    min-width: 920px;
+}
+.tag-ocr-table th,
+.tag-ocr-table td {
+    border-bottom: 1px solid var(--gray-200);
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: middle;
+}
+.tag-ocr-table th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary, #f8fafc);
+    z-index: 1;
+    white-space: nowrap;
+}
+.tag-ocr-table input[type="text"] {
+    width: 100%;
+    min-width: 88px;
+    padding: 6px 8px;
+    border: 1px solid var(--gray-300);
+    border-radius: 6px;
+    font-size: 12px;
+    background: var(--bg-primary, #fff);
+    color: var(--text-primary, inherit);
+}
+.tag-ocr-table .btn-small {
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
 /* RFID OAST form convert */
 .rfid-convert-status {
     margin-top: 10px;

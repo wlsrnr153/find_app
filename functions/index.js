@@ -5,8 +5,25 @@
 
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
+const vision = require('@google-cloud/vision');
 
 admin.initializeApp();
+
+/** Vision 클라이언트 재사용 */
+let visionClient = null;
+function getVisionClient() {
+  if (!visionClient) {
+    visionClient = new vision.ImageAnnotatorClient();
+  }
+  return visionClient;
+}
+
+function stripImageBase64(raw) {
+  const s = String(raw || '').trim();
+  const comma = s.indexOf('base64,');
+  if (comma >= 0) return s.slice(comma + 'base64,'.length);
+  return s;
+}
 
 /**
  * 사용자 역할 설정 함수 (관리자만 호출 가능)
@@ -161,6 +178,86 @@ exports.syncMyCustomClaims = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('internal', 'Custom Claims 동기화 중 오류가 발생했습니다');
   }
 });
+
+/**
+ * RFID 인쇄 태그 사진 → 클라우드 OCR (Google Cloud Vision)
+ * 클라이언트는 base64 이미지만 보내고, API 키는 Functions 서비스 계정으로 처리
+ *
+ * 사전 준비:
+ * 1) GCP에서 Cloud Vision API 사용 설정
+ * 2) firebase deploy --only functions:ocrAssetTagImage
+ */
+exports.ocrAssetTagImage = functions
+  .runWith({
+    timeoutSeconds: 60,
+    memory: '512MB'
+  })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다');
+    }
+
+    const imageBase64 = stripImageBase64(data?.imageBase64 || data?.image || '');
+    if (!imageBase64) {
+      throw new functions.https.HttpsError('invalid-argument', '이미지 데이터가 없습니다');
+    }
+    // Callable 한도(~10MB) 여유 — 대략 base64 6MB ≈ 원본 4.5MB
+    if (imageBase64.length > 6_000_000) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        '이미지가 너무 큽니다. 해상도를 낮추거나 한 장씩 올려 주세요.'
+      );
+    }
+
+    try {
+      const client = getVisionClient();
+      const request = {
+        image: {
+          content: Buffer.from(imageBase64, 'base64')
+        },
+        imageContext: {
+          languageHints: ['ko', 'en']
+        }
+      };
+
+      // 문서·표 형태 태그에 DOCUMENT_TEXT_DETECTION이 더 적합
+      const [result] = await client.documentTextDetection(request);
+      const text =
+        result?.fullTextAnnotation?.text
+        || result?.textAnnotations?.[0]?.description
+        || '';
+
+      if (result?.error?.message) {
+        throw new Error(result.error.message);
+      }
+
+      return {
+        success: true,
+        text: String(text || ''),
+        // 참고용 — Vision은 페이지 단위 신뢰도를 항상 주지 않음
+        pages: result?.fullTextAnnotation?.pages?.length || 0
+      };
+    } catch (error) {
+      console.error('ocrAssetTagImage 오류:', error);
+
+      if (error instanceof functions.https.HttpsError) {
+        throw error;
+      }
+
+      const msg = String(error?.message || error || '');
+      if (/PERMISSION_DENIED|Vision API has not been used|API has not been enabled/i.test(msg)) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Cloud Vision API가 프로젝트에서 사용 설정되지 않았습니다. GCP 콘솔에서 Vision API를 켜 주세요.'
+        );
+      }
+
+      throw new functions.https.HttpsError(
+        'internal',
+        msg.slice(0, 180) || '클라우드 OCR 처리 중 오류가 발생했습니다'
+      );
+    }
+  });
 
 /**
  * 기존 사용자의 Custom Claims 마이그레이션 (일회성 실행용)

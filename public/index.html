@@ -639,6 +639,26 @@
             </div>
 
             <div class="manage-section">
+                <h2>🏷️ RFID 태그 사진 → 엑셀</h2>
+                <p>
+                    동일한 국가자산 라벨 사진에서 <strong>인쇄된 글자</strong>(관리번호·품명·규격명 등)를
+                    <strong>클라우드 OCR(Vision)</strong>로 읽어 엑셀로 만듭니다. 로그인 필요 · RFID 칩 RF 읽기 아님.
+                    사진이 외부 OCR로 전송되며, Functions·Vision API 배포/사용 설정이 되어 있어야 합니다.
+                </p>
+                <input type="file" id="tagOcrFile" accept="image/*" multiple style="display: none;">
+                <div class="export-buttons">
+                    <button class="btn btn-primary" id="tagOcrPickBtn" type="button">📷 태그 사진 선택</button>
+                    <button class="btn btn-secondary" id="tagOcrRunBtn" type="button" disabled>🔍 글자 인식</button>
+                    <button class="btn btn-success" id="tagOcrExportBtn" type="button" disabled>⬇️ 엑셀 다운로드</button>
+                    <button class="btn btn-secondary" id="tagOcrClearBtn" type="button">비우기</button>
+                </div>
+                <p id="tagOcrStatus" class="tag-ocr-status"></p>
+                <div id="tagOcrPanel" class="tag-ocr-panel" hidden>
+                    <div id="tagOcrTableWrap"></div>
+                </div>
+            </div>
+
+            <div class="manage-section">
                 <h2>🔄 RFID 취득재산 일괄등록 변환</h2>
                 <p>다른 자산대장 엑셀을 분석해 <strong>RFID_OAST</strong> 양식(8행 헤더)에 맞춰 9행부터 채운 파일을 내려받습니다. 분류·식별이 비어 있으면 목록정보(로컬 스냅샷)로 자동 채웁니다.</p>
                 <input type="file" id="rfidSourceFile" accept=".xlsx,.xls" style="display: none;">
@@ -1082,6 +1102,7 @@
     <script src="form-schema.js"></script>
     <script src="baseline-register.js"></script>
     <script src="excel-form-convert.js"></script>
+    <script src="tag-ocr.js"></script>
     
     <!-- 메인 앱 스크립트 -->
     <script src="app.js"></script>

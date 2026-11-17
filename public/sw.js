@@ -1,4 +1,4 @@
-const CACHE_NAME = 'find-app-shell-v63';
+const CACHE_NAME = 'find-app-shell-v65';
 
 // 오프라인에서도 localhost 셸이 뜨도록 핵심 자산·vendor를 미리 캐시한다
 const APP_SHELL = [
@@ -20,6 +20,7 @@ const APP_SHELL = [
     '/useful-life-excel.js',
     '/useful-life-register.js',
     '/excel-form-convert.js',
+    '/tag-ocr.js',
     '/offline-queue.js',
     '/firebase-config.js',
     '/manifest.json',
