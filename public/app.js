@@ -2505,6 +2505,7 @@ function exportExcel() {
                 '실/호': item.room || '',
                 '사용위치': item.location || '',
                 '물품명': item.itemName || '',
+                '사용자': item.holder || '',
                 '자산번호': item.assetNumber || '',
                 '갯수': item.quantity || '',
                 '카테고리': item.category || '',
@@ -2528,10 +2529,12 @@ function exportExcel() {
         
         // 컬럼 너비 설정
         worksheet['!cols'] = [
-            { wch: 10 }, { wch: 15 }, { wch: 12 }, { wch: 15 },
-            { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
-            { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 20 }, 
-            { wch: 18 }, { wch: 20 }
+            { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 },
+            { wch: 8 }, { wch: 10 }, { wch: 16 }, { wch: 16 },
+            { wch: 12 }, { wch: 14 }, { wch: 8 }, { wch: 10 },
+            { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 8 },
+            { wch: 8 }, { wch: 8 }, { wch: 10 }, { wch: 8 },
+            { wch: 16 }, { wch: 18 }, { wch: 22 }
         ];
         
         const surveyLabel = (typeof getCurrentSurvey === 'function' && getCurrentSurvey()?.name) || '선택회차';
@@ -2689,6 +2692,7 @@ async function exportExcelAll() {
                 '실/호': item.room || '',
                 '사용위치': item.location || '',
                 '물품명': item.itemName || '',
+                '사용자': item.holder || '',
                 '자산번호': item.assetNumber || '',
                 '갯수': item.quantity || '',
                 '카테고리': item.category || '',
@@ -2712,11 +2716,12 @@ async function exportExcelAll() {
         
         // 컬럼 너비 설정
         worksheet['!cols'] = [
-            { wch: 10 }, { wch: 15 }, { wch: 12 }, { wch: 15 },
-            { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
-            { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
-            { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 20 }, 
-            { wch: 18 }, { wch: 20 }
+            { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 },
+            { wch: 8 }, { wch: 10 }, { wch: 16 }, { wch: 16 },
+            { wch: 12 }, { wch: 14 }, { wch: 8 }, { wch: 10 },
+            { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 8 },
+            { wch: 8 }, { wch: 8 }, { wch: 10 }, { wch: 8 },
+            { wch: 16 }, { wch: 18 }, { wch: 22 }
         ];
         
         // 파일 다운로드
@@ -2822,6 +2827,7 @@ async function handleImport(e) {
                 room: row['실/호'] || '',
                 location: row['사용위치'] || '',
                 itemName: row['물품명'] || '',
+                holder: row['사용자'] || '',
                 assetNumber: row['자산번호'] || '',
                 quantity: row['갯수'] || '',
                 category: row['카테고리'] || '',
