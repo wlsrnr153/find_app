@@ -9,11 +9,17 @@ let unsubscribe = null;
 let currentSort = 'newest';
 let continuousMode = false;
 let contextEditing = false;
-const FIELD_MODE_CORE = ['surveyor', 'organization', 'location', 'itemName', 'assetNumber', 'quantity'];
+const FIELD_MODE_CORE = ['surveyor', 'organization', 'location', 'itemName', 'holder', 'assetNumber', 'quantity'];
 const FIELD_MODE_OPTIONAL = ['acquiredAt', 'usefulLife', 'category', 'manufacturer', 'model', 'dimensions', 'color', 'material', 'condition', 'notes'];
 let selectedFields = [...FIELD_MODE_CORE];
 let organizations = [];
 let currentOrganization = '';
+/** 최근 칩용 — 저장 직후 즉시 반영 (items 배열 순서/서버 timestamp 지연에 의존하지 않음) */
+const RECENT_FIELD_LIMIT = 8;
+const recentFieldMemory = {
+    locations: [],
+    holders: []
+};
 
 // 🔥 리스너 등록 추적 (중복 방지)
 let isListenerRegistered = false;
@@ -454,6 +460,9 @@ async function initApp() {
     const quantityInput = document.getElementById('quantity');
     if (quantityInput) quantityInput.value = '1';
 
+    loadRecentFieldMemory();
+    refreshRecentFieldChips();
+
     initBackNavigation();
     
     console.log('✅ 앱 초기화 완료');
@@ -559,7 +568,7 @@ function switchTab(tabName) {
     document.body.classList.toggle('tab-input-active', tabName === 'input');
     if (tabName === 'input') {
         updateFieldContextChips();
-        refreshRecentLocations();
+        refreshRecentFieldChips();
         syncChoiceChips();
     }
     
@@ -1411,7 +1420,8 @@ function updateItemCount() {
     } else {
         itemCount.textContent = `${prefix} ${visibleCount}개 물품`;
     }
-    if (typeof refreshRecentLocations === 'function') refreshRecentLocations();
+    if (typeof refreshRecentFieldChips === 'function') refreshRecentFieldChips();
+    else if (typeof refreshRecentLocations === 'function') refreshRecentLocations();
 }
 
 // 현장 입력 모드 초기화
@@ -1457,7 +1467,7 @@ function setFieldMode(enabled, { toast = true } = {}) {
     }
     updateSubmitButtonLabel();
     updateFieldContextChips();
-    refreshRecentLocations();
+    refreshRecentFieldChips();
     persistFieldMode();
     if (toast) {
         showToast(continuousMode ? '현장 입력 모드 켜짐' : '전체 입력 모드', 'success');
@@ -1622,27 +1632,101 @@ function updateFieldContextChips() {
     setFieldChipValue('chipOrganization', '기관', org);
 }
 
-function refreshRecentLocations() {
-    const wrap = document.getElementById('recentLocations');
-    const list = document.getElementById('recentLocationsList');
+function getRecentFieldStorageKey(kind) {
+    const uid = currentUser?.uid || 'anon';
+    return kind === 'holder' ? `recent_holders_${uid}` : `recent_locations_${uid}`;
+}
+
+function loadRecentFieldMemory() {
+    try {
+        const loc = JSON.parse(localStorage.getItem(getRecentFieldStorageKey('location')) || '[]');
+        const holders = JSON.parse(localStorage.getItem(getRecentFieldStorageKey('holder')) || '[]');
+        recentFieldMemory.locations = Array.isArray(loc)
+            ? loc.map((v) => String(v || '').trim()).filter(Boolean).slice(0, RECENT_FIELD_LIMIT)
+            : [];
+        recentFieldMemory.holders = Array.isArray(holders)
+            ? holders.map((v) => String(v || '').trim()).filter(Boolean).slice(0, RECENT_FIELD_LIMIT)
+            : [];
+    } catch (_) {
+        recentFieldMemory.locations = [];
+        recentFieldMemory.holders = [];
+    }
+}
+
+function persistRecentFieldMemory(kind) {
+    try {
+        const list = kind === 'holder' ? recentFieldMemory.holders : recentFieldMemory.locations;
+        localStorage.setItem(getRecentFieldStorageKey(kind), JSON.stringify(list.slice(0, RECENT_FIELD_LIMIT)));
+    } catch (_) { /* quota */ }
+}
+
+function rememberRecentFieldValue(kind, value) {
+    const label = String(value || '').trim();
+    if (!label) return;
+    const key = kind === 'holder' ? 'holders' : 'locations';
+    const next = [label, ...(recentFieldMemory[key] || []).filter((v) => v !== label)];
+    recentFieldMemory[key] = next.slice(0, RECENT_FIELD_LIMIT);
+    persistRecentFieldMemory(kind);
+}
+
+function itemLocationLabel(item) {
+    const it = item || {};
+    return String(it.location || '').trim()
+        || [it.building, it.floor, it.room].map((v) => String(v || '').trim()).filter(Boolean).join(' ');
+}
+
+/**
+ * 최근 라벨 수집: 1) 이번 세션/로컬 저장 기억 2) 현재 회차 항목을 timestamp 최신순
+ * (예전: items 배열 끝부터 훑어 오래된 위치가 먼저 나옴 — 로드/리스너는 보통 최신이 앞)
+ */
+function collectRecentFieldLabels(kind, limit = 6) {
+    const seen = new Set();
+    const out = [];
+    const pushLabel = (raw) => {
+        const label = String(raw || '').trim();
+        if (!label || seen.has(label)) return false;
+        seen.add(label);
+        out.push(label);
+        return out.length >= limit;
+    };
+
+    const memory = kind === 'holder' ? recentFieldMemory.holders : recentFieldMemory.locations;
+    for (const label of memory || []) {
+        if (pushLabel(label)) return out;
+    }
+
+    const source = typeof sortItems === 'function'
+        ? sortItems(getItemsForView(), 'newest')
+        : (getItemsForView() || []);
+    for (const it of source) {
+        const label = kind === 'holder'
+            ? String(it?.holder || '').trim()
+            : itemLocationLabel(it);
+        if (pushLabel(label)) return out;
+    }
+    return out;
+}
+
+function renderRecentFieldChips(options) {
+    const {
+        wrapId,
+        listId,
+        kind,
+        inputId,
+        dataKey,
+        toastPrefix,
+        onApply
+    } = options;
+    const wrap = document.getElementById(wrapId);
+    const list = document.getElementById(listId);
     if (!wrap || !list) return;
+
     if (!continuousMode) {
         wrap.hidden = true;
         return;
     }
 
-    const seen = new Set();
-    const recent = [];
-    const source = Array.isArray(items) ? items : [];
-    for (let i = source.length - 1; i >= 0 && recent.length < 6; i -= 1) {
-        const it = source[i] || {};
-        const label = String(it.location || '').trim()
-            || [it.building, it.floor, it.room].map((v) => String(v || '').trim()).filter(Boolean).join(' ');
-        if (!label || seen.has(label)) continue;
-        seen.add(label);
-        recent.push({ label });
-    }
-
+    const recent = collectRecentFieldLabels(kind, 6);
     if (!recent.length) {
         wrap.hidden = true;
         list.innerHTML = '';
@@ -1650,19 +1734,72 @@ function refreshRecentLocations() {
     }
 
     wrap.hidden = false;
-    list.innerHTML = recent.map((loc) => (
-        `<button type="button" class="recent-location-chip" data-location="${escapeAttr(loc.label)}">${escapeHtml(loc.label)}</button>`
+    list.innerHTML = recent.map((label) => (
+        `<button type="button" class="recent-field-chip" data-value="${escapeAttr(label)}">${escapeHtml(label)}</button>`
     )).join('');
 
-    list.querySelectorAll('.recent-location-chip').forEach((btn) => {
+    list.querySelectorAll('.recent-field-chip').forEach((btn) => {
         btn.addEventListener('click', () => {
-            const locationEl = document.getElementById('location');
-            if (locationEl) locationEl.value = btn.dataset.location || '';
-            if (typeof updateLocationPreview === 'function') updateLocationPreview();
-            updateFieldContextChips();
-            showToast(`위치 적용: ${btn.textContent}`, 'success');
+            const applied = String(btn.dataset.value || '').trim();
+            const input = document.getElementById(inputId);
+            if (input) input.value = applied;
+            if (typeof onApply === 'function') onApply(applied, dataKey);
+            showToast(`${toastPrefix}: ${applied}`, 'success');
         });
     });
+}
+
+function isRecentChipFieldEnabled(fieldName) {
+    if (!continuousMode) return false;
+    return !fieldName || selectedFields.includes(fieldName);
+}
+
+function refreshRecentHolders() {
+    const wrap = document.getElementById('recentHolders');
+    if (!isRecentChipFieldEnabled('holder')) {
+        if (wrap) wrap.hidden = true;
+        return;
+    }
+    if (!recentFieldMemory.locations.length && !recentFieldMemory.holders.length) {
+        loadRecentFieldMemory();
+    }
+    renderRecentFieldChips({
+        wrapId: 'recentHolders',
+        listId: 'recentHoldersList',
+        kind: 'holder',
+        inputId: 'holder',
+        dataKey: 'holder',
+        toastPrefix: '사용자 적용',
+        onApply: () => updateFieldContextChips()
+    });
+}
+
+function refreshRecentLocations() {
+    const wrap = document.getElementById('recentLocations');
+    if (!isRecentChipFieldEnabled('location')) {
+        if (wrap) wrap.hidden = true;
+        return;
+    }
+    if (!recentFieldMemory.locations.length && !recentFieldMemory.holders.length) {
+        loadRecentFieldMemory();
+    }
+    renderRecentFieldChips({
+        wrapId: 'recentLocations',
+        listId: 'recentLocationsList',
+        kind: 'location',
+        inputId: 'location',
+        dataKey: 'location',
+        toastPrefix: '위치 적용',
+        onApply: () => {
+            if (typeof updateLocationPreview === 'function') updateLocationPreview();
+            updateFieldContextChips();
+        }
+    });
+}
+
+function refreshRecentFieldChips() {
+    refreshRecentHolders();
+    refreshRecentLocations();
 }
 
 function escapeAttr(value) {
@@ -1873,7 +2010,7 @@ function resetFormKeepCommon() {
     if (typeof refreshUsefulLifeUi === 'function') refreshUsefulLifeUi({ force: true });
     syncChoiceChips();
     updateFieldContextChips();
-    refreshRecentLocations();
+    refreshRecentFieldChips();
     if (typeof clearAssetMatchCandidates === 'function') clearAssetMatchCandidates();
     contextEditing = false;
     document.body.classList.remove('context-editing');
@@ -2018,6 +2155,8 @@ async function handleAddItem(e) {
             timestamp: new Date().toISOString()
         };
         await saveItemOffline(offlineData);
+        rememberRecentFieldValue('location', offlineData.location || data.location);
+        rememberRecentFieldValue('holder', offlineData.holder || data.holder);
         showToast(`오프라인 저장: "${data.itemName || '물품'}". 연결되면 자동 업로드합니다`, 'success');
         resetFormAfterAdd();
     };
@@ -2055,6 +2194,10 @@ async function handleAddItem(e) {
     try {
         const docRef = await db.collection('items').add(payload);
         console.log('✅ 물품 등록 완료! 문서ID:', docRef.id);
+
+        // 칩용 최근값을 저장 직후 기록 (리스너·배열 순서보다 먼저)
+        rememberRecentFieldValue('location', payload.location);
+        rememberRecentFieldValue('holder', payload.holder);
 
         // 본저장 성공 즉시 UI 복귀 — 대장/위치 후처리는 백그라운드
         showToast(`✅ "${payload.itemName || '물품'}" 등록 완료!`, 'success');
@@ -3480,4 +3623,6 @@ window.loadNextPage = loadNextPage;
 window.goToFirstPage = goToFirstPage;
 window.updateFieldContextChips = updateFieldContextChips;
 window.refreshRecentLocations = refreshRecentLocations;
+window.refreshRecentHolders = refreshRecentHolders;
+window.refreshRecentFieldChips = refreshRecentFieldChips;
 window.initBackNavigation = initBackNavigation;

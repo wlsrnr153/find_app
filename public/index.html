@@ -280,14 +280,19 @@
                     <input type="text" id="itemName" name="itemName" required placeholder="예: 사무용 책상" enterkeyhint="next" autocomplete="off">
                 </div>
 
+                <div id="recentHolders" class="recent-field-chips" hidden>
+                    <span class="recent-field-chips-label">최근 사용자</span>
+                    <div id="recentHoldersList" class="recent-field-chips-list"></div>
+                </div>
+
                 <div class="form-group form-group-priority" data-field="holder">
                     <label for="holder">사용자</label>
                     <input type="text" id="holder" name="holder" placeholder="사용·관리 담당자" enterkeyhint="next" autocomplete="off">
                 </div>
 
-                <div id="recentLocations" class="recent-locations" hidden>
-                    <span class="recent-locations-label">최근 위치</span>
-                    <div id="recentLocationsList" class="recent-locations-list"></div>
+                <div id="recentLocations" class="recent-field-chips recent-locations" hidden>
+                    <span class="recent-field-chips-label">최근 위치</span>
+                    <div id="recentLocationsList" class="recent-field-chips-list"></div>
                 </div>
 
                 <div class="form-group form-group-priority" data-field="location">

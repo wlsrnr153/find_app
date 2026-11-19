@@ -3365,10 +3365,12 @@ body.dark-mode .scan-photo-hint.is-emphasis {
     text-align: center;
 }
 
+.recent-field-chips,
 .recent-locations {
     margin-bottom: 14px;
 }
 
+.recent-field-chips-label,
 .recent-locations-label {
     display: block;
     font-size: 12px;
@@ -3377,12 +3379,17 @@ body.dark-mode .scan-photo-hint.is-emphasis {
     margin-bottom: 6px;
 }
 
+.recent-field-chips-list,
 .recent-locations-list {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
 }
 
+.recent-field-chip,
 .recent-location-chip {
     border: 1px solid var(--gray-200);
     background: var(--bg-primary);
@@ -3391,6 +3398,11 @@ body.dark-mode .scan-photo-hint.is-emphasis {
     font-size: 13px;
     min-height: 40px;
     cursor: pointer;
+    flex: 0 0 auto;
+    max-width: 80vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .qty-stepper {
@@ -3497,7 +3509,8 @@ body.dark-mode .form-actions-sticky {
 }
 
 body:not(.field-mode) .field-context-bar,
-body:not(.field-mode) .recent-locations {
+body:not(.field-mode) .recent-locations,
+body:not(.field-mode) .recent-field-chips {
     display: none !important;
 }
 
